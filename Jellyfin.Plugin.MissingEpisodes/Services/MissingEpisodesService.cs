@@ -58,6 +58,9 @@ public class MissingEpisodesService
                 result = ScanJellyfinOnly(cfg);
                 if (sonarrReady)
                 {
+                    // Only enrich with Sonarr episode IDs (for searching). Don't replace Jellyfin's
+                    // own thumbnails with Sonarr screenshots — when the user picks "Jellyfin", the
+                    // UI should show Jellyfin's data.
                     await EnrichWithSonarrIdsAsync(cfg, result, ct).ConfigureAwait(false);
                 }
             }
@@ -109,14 +112,22 @@ public class MissingEpisodesService
                 continue;
             }
 
+            // Build per-season stats over the episodes that count (honoring ignore flags).
+            var seasonStats = new Dictionary<int, SeasonCount>();
             var missing = new List<MissingEpisode>();
             foreach (var ep in eps)
             {
                 if (cfg.IgnoreSpecials && ep.SeasonNumber == 0) continue;
                 if (cfg.OnlyMonitored && !ep.Monitored) continue;
-                if (cfg.IgnoreUnaired && (ep.AirDateUtc == null || ep.AirDateUtc > now)) continue;
-                if (ep.HasFile) continue;
+                var unaired = ep.AirDateUtc == null || ep.AirDateUtc > now;
+                if (cfg.IgnoreUnaired && unaired) continue;
 
+                if (!seasonStats.TryGetValue(ep.SeasonNumber, out var stats)) stats = new SeasonCount();
+                stats.Total += 1;
+                if (ep.HasFile) stats.Have += 1;
+                seasonStats[ep.SeasonNumber] = stats;
+
+                if (ep.HasFile) continue;
                 missing.Add(new MissingEpisode
                 {
                     Id = ep.Id,
@@ -143,10 +154,19 @@ public class MissingEpisodesService
                 Year = s.Year,
                 Network = s.Network,
                 Status = s.Status,
+                Path = s.Path,
+                SeriesType = NormalizeSeriesType(s.SeriesType),
                 PosterUrl = PickImage(s.Images, "poster"),
                 BackdropUrl = PickImage(s.Images, "fanart") ?? PickImage(s.Images, "banner"),
                 MissingCount = missing.Count,
-                TotalEpisodes = s.Statistics?.TotalEpisodeCount ?? eps.Count,
+                HaveEpisodes = seasonStats.Values.Sum(x => x.Have),
+                TotalEpisodes = seasonStats.Values.Sum(x => x.Total),
+                Seasons = seasonStats.OrderBy(kv => kv.Key).Select(kv => new SeasonSummary
+                {
+                    SeasonNumber = kv.Key,
+                    TotalEpisodes = kv.Value.Total,
+                    HaveEpisodes = kv.Value.Have
+                }).ToList(),
                 Missing = missing
             });
         }
@@ -181,25 +201,17 @@ public class MissingEpisodesService
             int.TryParse(tvdbStr, out var tvdbId);
             if (tvdbId > 0 && ignoredTvdb.Contains(tvdbId)) continue;
 
-            // Jellyfin creates virtual episode items for episodes it knows exist (per metadata provider)
-            // but has no file for — that's our "missing" set.
-            var missingEps = _libraryManager.GetItemList(new InternalItemsQuery
+            var allEps = _libraryManager.GetItemList(new InternalItemsQuery
             {
                 IncludeItemTypes = new[] { BaseItemKind.Episode },
                 AncestorIds = new[] { series.Id },
-                IsVirtualItem = true,
                 Recursive = true
             });
 
-            var totalEps = _libraryManager.GetItemList(new InternalItemsQuery
-            {
-                IncludeItemTypes = new[] { BaseItemKind.Episode },
-                AncestorIds = new[] { series.Id },
-                Recursive = true
-            }).Count;
-
+            var seasonStats = new Dictionary<int, SeasonCount>();
             var missing = new List<MissingEpisode>();
-            foreach (var e in missingEps)
+
+            foreach (var e in allEps)
             {
                 if (e is not Episode episode) continue;
                 var season = episode.ParentIndexNumber;
@@ -207,8 +219,23 @@ public class MissingEpisodesService
                 if (!season.HasValue || !num.HasValue) continue;
                 if (cfg.IgnoreSpecials && season.Value == 0) continue;
 
+                var isVirtual = episode.IsVirtualItem;
                 var air = episode.PremiereDate;
-                if (cfg.IgnoreUnaired && (!air.HasValue || air.Value.ToUniversalTime() > now)) continue;
+                var unaired = !air.HasValue || air.Value.ToUniversalTime() > now;
+                if (cfg.IgnoreUnaired && unaired) continue;
+
+                if (!seasonStats.TryGetValue(season.Value, out var stats)) stats = new SeasonCount();
+                // For multi-episode files in Jellyfin the range is IndexNumber..IndexNumberEnd
+                var start = num.Value;
+                var end = episode.IndexNumberEnd ?? start;
+                for (var n = start; n <= end; n++)
+                {
+                    stats.Total += 1;
+                    if (!isVirtual) stats.Have += 1;
+                }
+                seasonStats[season.Value] = stats;
+
+                if (!isVirtual) continue;
 
                 var jfEpId = episode.Id.ToString("N");
                 missing.Add(new MissingEpisode
@@ -220,7 +247,7 @@ public class MissingEpisodesService
                     AirDateUtc = air?.ToUniversalTime(),
                     Overview = episode.Overview,
                     JellyfinEpisodeId = jfEpId,
-                    ThumbnailUrl = "jellyfin:" + jfEpId // prefix tells the UI to resolve via ApiClient
+                    ThumbnailUrl = "jellyfin:" + jfEpId
                 });
             }
 
@@ -236,10 +263,19 @@ public class MissingEpisodesService
                 Year = series.ProductionYear ?? 0,
                 Network = series.Studios?.FirstOrDefault(),
                 Status = series.Status?.ToString(),
+                Path = series.Path,
+                SeriesType = InferJellyfinSeriesType(series),
                 PosterUrl = "jellyfin:" + jfSeriesId,
                 BackdropUrl = "jellyfin-backdrop:" + jfSeriesId,
                 MissingCount = missing.Count,
-                TotalEpisodes = totalEps,
+                HaveEpisodes = seasonStats.Values.Sum(x => x.Have),
+                TotalEpisodes = seasonStats.Values.Sum(x => x.Total),
+                Seasons = seasonStats.OrderBy(kv => kv.Key).Select(kv => new SeasonSummary
+                {
+                    SeasonNumber = kv.Key,
+                    TotalEpisodes = kv.Value.Total,
+                    HaveEpisodes = kv.Value.Have
+                }).ToList(),
                 Missing = missing
             });
         }
@@ -262,6 +298,12 @@ public class MissingEpisodesService
             {
                 if (s.TvdbId <= 0 || !byTvdb.TryGetValue(s.TvdbId, out var sonarrS)) continue;
                 s.SonarrId = sonarrS.Id;
+                // If Sonarr knows the series as anime but Jellyfin didn't tag it, use Sonarr's type.
+                if (s.SeriesType == "standard")
+                {
+                    var sonarrType = NormalizeSeriesType(sonarrS.SeriesType);
+                    if (sonarrType != "standard") s.SeriesType = sonarrType;
+                }
 
                 List<SonarrEpisode> eps;
                 try
@@ -280,9 +322,7 @@ public class MissingEpisodesService
                     if (epIndex.TryGetValue((m.SeasonNumber, m.EpisodeNumber), out var se))
                     {
                         m.Id = se.Id;
-                        // Prefer Sonarr's screenshot when we have one, over the Jellyfin virtual episode thumb.
-                        var shot = PickImage(se.Images, "screenshot");
-                        if (!string.IsNullOrEmpty(shot)) m.ThumbnailUrl = shot;
+                        // Do NOT replace ThumbnailUrl here — leaving Jellyfin's own thumb intact.
                     }
                 }
             }
@@ -309,6 +349,38 @@ public class MissingEpisodesService
             map[tvdbId] = series.Id.ToString("N");
         }
         return map;
+    }
+
+    private static string NormalizeSeriesType(string? sonarrType)
+    {
+        if (string.IsNullOrEmpty(sonarrType)) return "standard";
+        var lowered = sonarrType.ToLowerInvariant();
+        return lowered switch
+        {
+            "anime" => "anime",
+            "daily" => "daily",
+            _ => "standard"
+        };
+    }
+
+    private static string InferJellyfinSeriesType(Series series)
+    {
+        // Jellyfin has no first-class "anime" flag. Best-effort: look for an Anime genre/tag.
+        if (series.Genres != null)
+        {
+            foreach (var g in series.Genres)
+            {
+                if (string.Equals(g, "Anime", StringComparison.OrdinalIgnoreCase)) return "anime";
+            }
+        }
+        if (series.Tags != null)
+        {
+            foreach (var t in series.Tags)
+            {
+                if (string.Equals(t, "Anime", StringComparison.OrdinalIgnoreCase)) return "anime";
+            }
+        }
+        return "standard";
     }
 
     private static void FinalizeResult(ScanResult result)
@@ -343,7 +415,7 @@ public class MissingEpisodesService
         var batch = cfg.AutoSearchBatchLimit > 0 ? cfg.AutoSearchBatchLimit : 50;
 
         var total = 0;
-        var filtered = episodeIds.Where(id => id > 0).ToList();
+        var filtered = episodeIds.Where(id => id > 0).Distinct().ToList();
         for (var i = 0; i < filtered.Count; i += batch)
         {
             var slice = filtered.Skip(i).Take(batch).ToList();
@@ -373,11 +445,22 @@ public class ScanSeries
     public int Year { get; set; }
     public string? Network { get; set; }
     public string? Status { get; set; }
+    public string? Path { get; set; }
+    public string SeriesType { get; set; } = "standard";
     public string? PosterUrl { get; set; }
     public string? BackdropUrl { get; set; }
     public int MissingCount { get; set; }
+    public int HaveEpisodes { get; set; }
     public int TotalEpisodes { get; set; }
+    public List<SeasonSummary> Seasons { get; set; } = new();
     public List<MissingEpisode> Missing { get; set; } = new();
+}
+
+public class SeasonSummary
+{
+    public int SeasonNumber { get; set; }
+    public int TotalEpisodes { get; set; }
+    public int HaveEpisodes { get; set; }
 }
 
 public class MissingEpisode
@@ -391,4 +474,10 @@ public class MissingEpisode
     public string? FinaleType { get; set; }
     public string? JellyfinEpisodeId { get; set; }
     public string? ThumbnailUrl { get; set; }
+}
+
+internal class SeasonCount
+{
+    public int Total { get; set; }
+    public int Have { get; set; }
 }

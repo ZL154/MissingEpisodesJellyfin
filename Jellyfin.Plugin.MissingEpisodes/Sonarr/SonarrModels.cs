@@ -17,6 +17,8 @@ public class SonarrSeries
     [JsonPropertyName("tmdbId")] public int TmdbId { get; set; }
     [JsonPropertyName("monitored")] public bool Monitored { get; set; }
     [JsonPropertyName("seriesType")] public string? SeriesType { get; set; }
+    [JsonPropertyName("path")] public string? Path { get; set; }
+    [JsonPropertyName("rootFolderPath")] public string? RootFolderPath { get; set; }
     [JsonPropertyName("useSceneNumbering")] public bool UseSceneNumbering { get; set; }
     [JsonPropertyName("images")] public List<SonarrImage>? Images { get; set; }
     [JsonPropertyName("statistics")] public SonarrSeriesStatistics? Statistics { get; set; }

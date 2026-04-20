@@ -178,15 +178,43 @@
 .me-dhead .info .meta .dot { width: 3px; height: 3px; border-radius: 50%; background: var(--dim-2); }
 .me-dhead .info .pill { padding: .2rem .6rem; background: rgba(229,112,110,0.15); color: var(--danger);
   border-radius: 100px; font-weight: 600; font-size: .72rem; letter-spacing: .2px; }
+.me-dhead .info .pill.anime { background: rgba(107,122,161,0.2); color: #8da4d0; }
 .me-dhead .info .actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: 1rem; }
+.me-dhead .info .path { margin-top: .8rem; font-size: .74rem; color: var(--dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; background: var(--panel-2);
+  padding: .4rem .55rem; border-radius: 5px; border: 1px solid var(--border); display: inline-block;
+  max-width: 100%; }
+.me-progress { margin-top: .5rem; height: 5px; border-radius: 100px; background: var(--panel-2);
+  overflow: hidden; max-width: 320px; }
+.me-progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent) 0%, #7ed0b3 100%);
+  border-radius: inherit; transition: width .3s ease; }
+.me-dhead .info .progress-wrap { margin-top: .6rem; font-size: .75rem; color: var(--dim); }
+.me-type-pill { display: inline-flex; padding: .08rem .45rem; font-size: .62rem; font-weight: 600;
+  letter-spacing: .6px; text-transform: uppercase; background: rgba(107,122,161,0.22); color: #8da4d0;
+  border-radius: 100px; margin-left: .35rem; vertical-align: middle; }
 
-.me-season { margin-top: 1.5rem; }
-.me-season-head { display: flex; align-items: center; justify-content: space-between;
-  margin: 0 0 .7rem; padding-bottom: .5rem; border-bottom: 1px solid var(--border); }
-.me-season-head h3 { margin: 0; font-size: .98rem; font-weight: 600; letter-spacing: .01em;
+.me-season { margin-top: .75rem; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 9px; overflow: hidden; }
+.me-season-head { display: flex; align-items: center; justify-content: space-between; gap: .7rem;
+  padding: .7rem .9rem; cursor: pointer; user-select: none; transition: background .14s; }
+.me-season-head:hover { background: var(--panel-hi); }
+.me-season-head .left { display: flex; align-items: center; gap: .6rem; flex: 1; min-width: 0; }
+.me-season-head .chevron { width: 14px; height: 14px; color: var(--dim); flex: 0 0 auto;
+  transition: transform .18s ease; }
+.me-season.open .me-season-head .chevron { transform: rotate(90deg); }
+.me-season-head h3 { margin: 0; font-size: .95rem; font-weight: 600; letter-spacing: .01em;
   display: flex; align-items: center; gap: .55rem; }
-.me-season-head h3 .c { color: var(--dim); font-weight: 500; font-size: .78rem; }
-.me-season-head .me-btn { padding: .4rem .7rem; font-size: .76rem; }
+.me-season-head .count { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--dim); font-size: .78rem; font-weight: 500; }
+.me-season-head .count .missing { color: var(--danger); margin-left: .5rem; font-weight: 600; }
+.me-season-head .mini-bar { width: 80px; height: 4px; background: var(--panel-2); border-radius: 100px;
+  overflow: hidden; margin-left: .35rem; flex: 0 0 auto; }
+.me-season-head .mini-bar-fill { height: 100%; background: var(--accent); border-radius: inherit; }
+.me-season-head .actions { display: flex; gap: .4rem; flex: 0 0 auto; }
+.me-season-head .actions .me-btn { padding: .32rem .6rem; font-size: .73rem; }
+.me-season-body { display: none; padding: .55rem .75rem .75rem; border-top: 1px solid var(--border);
+  background: rgba(0,0,0,0.1); }
+.me-season.open .me-season-body { display: block; }
 
 .me-ep-list { display: flex; flex-direction: column; gap: .55rem; }
 .me-ep { display: flex; align-items: stretch; gap: .85rem; padding: .7rem .8rem;
@@ -351,6 +379,11 @@
     </div>
 
     <div class="me-filters" id="meFilters" style="display:none;">
+      <div class="me-segment" id="meTypeSeg">
+        <button type="button" data-v="all" class="active">All</button>
+        <button type="button" data-v="standard">TV</button>
+        <button type="button" data-v="anime">Anime</button>
+      </div>
       <div class="me-search">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
         <input type="search" id="meSearch" placeholder="Filter shows" />
@@ -360,6 +393,10 @@
         <button type="button" data-v="title">Title</button>
         <button type="button" data-v="recent">Recent</button>
       </div>
+      <button type="button" class="me-btn" id="meBulkSearchBtn" title="Send all visible missing episodes to Sonarr">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v14M5 9l7 7 7-7M5 22h14"/></svg>
+        Search all
+      </button>
     </div>
 
     <div id="meGrid" class="me-grid"></div>
@@ -409,7 +446,7 @@
     var PLUGIN_ID = 'b7a24c68-7f3e-4c0a-9a9e-6e2b9e1a4f33';
     var page = document.querySelector('#missingEpisodesPage');
     var state = { result: null, filtered: [], current: null, cfg: null,
-                  sort: 'count', query: '', cfgOpen: false };
+                  sort: 'count', query: '', type: 'all', cfgOpen: false };
 
     var ICON_OK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
     var ICON_ERR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v5M12 16h.01"/></svg>';
@@ -634,7 +671,10 @@
     function applyFilters() {
         if (!state.result) return;
         var q = state.query.trim().toLowerCase();
+        var typeFilter = state.type;
         var list = state.result.Series.filter(function (s) {
+            if (typeFilter === 'anime' && s.SeriesType !== 'anime') return false;
+            if (typeFilter === 'standard' && s.SeriesType === 'anime') return false;
             return !q || s.Title.toLowerCase().indexOf(q) !== -1;
         });
         if (state.sort === 'title') {
@@ -672,11 +712,13 @@
             var metaLine = meta.length
                 ? meta.join(' <span class="dot"></span> ')
                 : '&nbsp;';
+            var titleTag = s.SeriesType === 'anime'
+                ? '<span class="me-type-pill">Anime</span>' : '';
             return '<div class="me-show" data-i="' + idx + '">'
                 + poster
                 + '<span class="me-badge' + (low ? ' low' : '') + '">' + s.MissingCount + ' missing</span>'
                 + '<div class="me-show-meta">'
-                + '<div class="t">' + escapeHtml(s.Title) + '</div>'
+                + '<div class="t">' + escapeHtml(s.Title) + titleTag + '</div>'
                 + '<div class="s">' + metaLine + '</div>'
                 + '</div></div>';
         }).join('');
@@ -695,7 +737,6 @@
         $('#meDetail').classList.add('open');
         window.scrollTo({ top: 0, behavior: 'instant' });
 
-        // header
         var posterEl = $('#meDetailPoster');
         var posterUrl = resolveImage(s.PosterUrl, 'Primary');
         if (posterUrl) {
@@ -705,44 +746,55 @@
             posterEl.style.backgroundImage = '';
             posterEl.innerHTML = '<div class="me-ph">' + escapeHtml(s.Title) + '</div>';
         }
-        $('#meDetailTitle').textContent = s.Title + (s.Year ? ' (' + s.Year + ')' : '');
+        var titleTag = s.SeriesType === 'anime' ? ' <span class="me-type-pill">Anime</span>' : '';
+        $('#meDetailTitle').innerHTML = escapeHtml(s.Title + (s.Year ? ' (' + s.Year + ')' : '')) + titleTag;
 
+        var pct = s.TotalEpisodes > 0 ? Math.round(100 * s.HaveEpisodes / s.TotalEpisodes) : 0;
         var meta = [];
         meta.push('<span class="pill">' + s.MissingCount + ' missing</span>');
         if (s.Network) meta.push(escapeHtml(s.Network));
         if (s.Status) meta.push(escapeHtml(s.Status));
-        meta.push(s.TotalEpisodes + ' total episodes');
-        $('#meDetailMeta').innerHTML = meta.join(' <span class="dot"></span> ');
+        meta.push('<strong style="color:var(--text)">' + s.HaveEpisodes + ' / ' + s.TotalEpisodes + '</strong> episodes');
+        meta.push(pct + '% complete');
+        $('#meDetailMeta').innerHTML = meta.join(' <span class="dot"></span> ')
+            + '<div class="progress-wrap"><div class="me-progress"><div class="me-progress-fill" style="width:' + pct + '%"></div></div></div>'
+            + (s.Path ? '<div class="path" title="' + escapeHtml(s.Path) + '">' + escapeHtml(s.Path) + '</div>' : '');
 
-        // Search-all button: only available when Sonarr is configured AND we have ids
         var searchable = !!(state.result && state.result.SonarrConfigured)
             && s.Missing.some(function (m) { return m.Id > 0; });
         var searchAllBtn = $('#meDetailSearchAll');
         searchAllBtn.disabled = !searchable;
         searchAllBtn.title = searchable ? '' : 'Configure Sonarr to enable searching';
 
-        // seasons
+        // Group by season, merge with Seasons summary for have/total counts
         var bySeason = {};
         s.Missing.forEach(function (ep) {
             (bySeason[ep.SeasonNumber] = bySeason[ep.SeasonNumber] || []).push(ep);
         });
+        var summary = {};
+        (s.Seasons || []).forEach(function (x) { summary[x.SeasonNumber] = x; });
         var seasons = Object.keys(bySeason).map(Number).sort(function (a, b) { return a - b; });
-        var seasonHtml = seasons.map(function (sn) {
+
+        var seasonHtml = seasons.map(function (sn, idx) {
             var eps = bySeason[sn].sort(function (a, b) { return a.EpisodeNumber - b.EpisodeNumber; });
+            var sum = summary[sn] || { TotalEpisodes: eps.length, HaveEpisodes: 0 };
+            var total = sum.TotalEpisodes || eps.length;
+            var have = sum.HaveEpisodes || 0;
+            var pctSeason = total > 0 ? Math.round(100 * have / total) : 0;
             var seasonLabel = sn === 0 ? 'Specials' : 'Season ' + sn;
             var hasSearchable = searchable && eps.some(function (e) { return e.Id > 0; });
 
             var rows = eps.map(function (ep) {
                 var thumbUrl = resolveImage(ep.ThumbnailUrl, 'Primary');
+                var code = 'S' + String(sn).padStart(2, '0') + 'E' + String(ep.EpisodeNumber).padStart(2, '0');
                 var thumb = thumbUrl
                     ? '<div class="me-ep-thumb" style="background-image:url(\'' + escapeHtml(thumbUrl) + '\');"></div>'
-                    : '<div class="me-ep-thumb"><div class="me-ph">S' + String(sn).padStart(2, '0') + 'E' + String(ep.EpisodeNumber).padStart(2, '0') + '</div></div>';
+                    : '<div class="me-ep-thumb"><div class="me-ph">' + code + '</div></div>';
                 var air = ep.AirDateUtc ? new Date(ep.AirDateUtc).toLocaleDateString() : '';
-                var code = 'S' + String(sn).padStart(2, '0') + 'E' + String(ep.EpisodeNumber).padStart(2, '0');
                 var canSearch = searchable && ep.Id > 0;
                 var btn = canSearch
                     ? '<div class="me-ep-action"><button type="button" data-id="' + ep.Id + '">Search</button></div>'
-                    : '<div class="me-ep-action locked"><button type="button" disabled>Search</button></div>';
+                    : '<div class="me-ep-action locked"><button type="button" disabled title="Configure Sonarr to enable">Search</button></div>';
                 return '<div class="me-ep" data-id="' + ep.Id + '">'
                     + thumb
                     + '<div class="me-ep-body">'
@@ -758,22 +810,39 @@
             }).join('');
 
             var seasonSearch = hasSearchable
-                ? '<button type="button" class="me-btn" data-season="' + sn + '">Search season</button>'
+                ? '<button type="button" class="me-btn" data-season-search="' + sn + '">Search season</button>'
                 : '';
-            return '<section class="me-season">'
-                + '<div class="me-season-head">'
-                + '<h3>' + seasonLabel + ' <span class="c">· ' + eps.length + ' missing</span></h3>'
-                + seasonSearch
+            var openClass = idx === 0 ? ' open' : '';
+            return '<section class="me-season' + openClass + '" data-season="' + sn + '">'
+                + '<div class="me-season-head" data-toggle="' + sn + '">'
+                + '<div class="left">'
+                + '<svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>'
+                + '<h3>' + seasonLabel + '</h3>'
+                + '<span class="count">' + have + ' / ' + total
+                + '<span class="missing">' + (total - have) + ' missing</span>'
+                + '</span>'
+                + '<span class="mini-bar"><span class="mini-bar-fill" style="width:' + pctSeason + '%"></span></span>'
                 + '</div>'
-                + '<div class="me-ep-list">' + rows + '</div>'
+                + '<div class="actions">' + seasonSearch + '</div>'
+                + '</div>'
+                + '<div class="me-season-body"><div class="me-ep-list">' + rows + '</div></div>'
                 + '</section>';
         }).join('');
 
         $('#meDetailSeasons').innerHTML = seasonHtml;
 
+        // toggle accordion (clicks on the head, but not on the search button)
+        $('#meDetailSeasons').querySelectorAll('.me-season-head').forEach(function (h) {
+            h.addEventListener('click', function (e) {
+                if (e.target.closest('[data-season-search]')) return;
+                h.closest('.me-season').classList.toggle('open');
+            });
+        });
+
         // per-episode search
         $('#meDetailSeasons').querySelectorAll('.me-ep-action button[data-id]').forEach(function (b) {
-            b.addEventListener('click', function () {
+            b.addEventListener('click', function (e) {
+                e.stopPropagation();
                 var id = parseInt(b.getAttribute('data-id'), 10);
                 if (!id) return;
                 searchEpisodes([id], b.closest('.me-ep'));
@@ -781,18 +850,16 @@
         });
 
         // per-season search
-        $('#meDetailSeasons').querySelectorAll('.me-season-head button[data-season]').forEach(function (b) {
-            b.addEventListener('click', function () {
-                var sn = parseInt(b.getAttribute('data-season'), 10);
+        $('#meDetailSeasons').querySelectorAll('[data-season-search]').forEach(function (b) {
+            b.addEventListener('click', function (e) {
+                e.stopPropagation();
+                var sn = parseInt(b.getAttribute('data-season-search'), 10);
                 var seasonEps = state.current.Missing.filter(function (m) { return m.SeasonNumber === sn && m.Id > 0; });
                 var ids = seasonEps.map(function (m) { return m.Id; });
                 if (!ids.length) return;
                 searchEpisodes(ids, null);
-                // mark all in this season
-                $('#meDetailSeasons').querySelectorAll('.me-season').forEach(function (sec) {
-                    var head = sec.querySelector('[data-season="' + sn + '"]');
-                    if (head) sec.querySelectorAll('.me-ep').forEach(function (r) { r.classList.add('searched'); });
-                });
+                var sec = b.closest('.me-season');
+                if (sec) sec.querySelectorAll('.me-ep').forEach(function (r) { r.classList.add('searched'); });
             });
         });
     }
@@ -855,6 +922,28 @@
             setSeg('#meSortSeg', state.sort);
             applyFilters();
         }
+    });
+    $('#meTypeSeg').addEventListener('click', function (e) {
+        if (e.target.tagName === 'BUTTON') {
+            state.type = e.target.getAttribute('data-v');
+            setSeg('#meTypeSeg', state.type);
+            applyFilters();
+        }
+    });
+    $('#meBulkSearchBtn').addEventListener('click', function () {
+        if (!state.result) return;
+        if (!state.result.SonarrConfigured) {
+            toast('Sonarr must be configured for bulk search', 'err'); return;
+        }
+        var ids = state.filtered.reduce(function (acc, s) {
+            s.Missing.forEach(function (m) { if (m.Id > 0) acc.push(m.Id); });
+            return acc;
+        }, []);
+        if (!ids.length) { toast('Nothing with Sonarr IDs to search', 'err'); return; }
+        if (!confirm('Send ' + ids.length + ' missing episode' + (ids.length === 1 ? '' : 's')
+            + ' across ' + state.filtered.length + ' show' + (state.filtered.length === 1 ? '' : 's')
+            + ' to Sonarr?')) return;
+        searchEpisodes(ids, null);
     });
     $('#meSearch').addEventListener('input', function (e) { state.query = e.target.value || ''; applyFilters(); });
     $('#meBackBtn').addEventListener('click', closeDetail);
