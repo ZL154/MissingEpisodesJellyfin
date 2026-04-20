@@ -41,8 +41,23 @@ public class MissingEpisodesController : ControllerBase
     [ProducesResponseType(typeof(ScanResult), StatusCodes.Status200OK)]
     public async Task<ActionResult> Scan(CancellationToken ct)
     {
-        var result = await _service.ScanAsync(ct).ConfigureAwait(false);
-        return Ok(result);
+        try
+        {
+            var result = await _service.ScanAsync(ct).ConfigureAwait(false);
+            return Ok(result);
+        }
+        catch (System.InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (System.Net.Http.HttpRequestException ex)
+        {
+            return StatusCode(502, new { error = "Sonarr unreachable: " + ex.Message });
+        }
+        catch (System.Exception ex)
+        {
+            return StatusCode(500, new { error = ex.Message });
+        }
     }
 
     [HttpGet("last")]

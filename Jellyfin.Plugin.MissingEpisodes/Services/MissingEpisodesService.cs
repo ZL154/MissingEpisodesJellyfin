@@ -119,10 +119,9 @@ public class MissingEpisodesService
 
                 if (missing.Count == 0) continue;
 
-                var poster = s.Images?.FirstOrDefault(i =>
-                    string.Equals(i.CoverType, "poster", StringComparison.OrdinalIgnoreCase))?.RemoteUrl
-                    ?? s.Images?.FirstOrDefault(i =>
-                        string.Equals(i.CoverType, "poster", StringComparison.OrdinalIgnoreCase))?.Url;
+                var poster = PickImage(s.Images, "poster");
+                var banner = PickImage(s.Images, "banner");
+                var fanart = PickImage(s.Images, "fanart");
 
                 result.Series.Add(new ScanSeries
                 {
@@ -133,6 +132,7 @@ public class MissingEpisodesService
                     Network = s.Network,
                     Status = s.Status,
                     PosterUrl = poster,
+                    BackdropUrl = fanart ?? banner,
                     MissingCount = missing.Count,
                     TotalEpisodes = s.Statistics?.TotalEpisodeCount ?? eps.Count,
                     Missing = missing
@@ -204,6 +204,18 @@ public class MissingEpisodesService
         return map;
     }
 
+    private static string? PickImage(List<Jellyfin.Plugin.MissingEpisodes.Sonarr.SonarrImage>? images, string coverType)
+    {
+        if (images == null) return null;
+        foreach (var img in images)
+        {
+            if (!string.Equals(img.CoverType, coverType, StringComparison.OrdinalIgnoreCase)) continue;
+            if (!string.IsNullOrWhiteSpace(img.RemoteUrl)) return img.RemoteUrl;
+            if (!string.IsNullOrWhiteSpace(img.Url)) return img.Url;
+        }
+        return null;
+    }
+
     public async Task<int> TriggerSearchAsync(IReadOnlyList<int> episodeIds, CancellationToken ct = default)
     {
         var cfg = Plugin.Instance?.Configuration
@@ -239,6 +251,7 @@ public class ScanSeries
     public string? Network { get; set; }
     public string? Status { get; set; }
     public string? PosterUrl { get; set; }
+    public string? BackdropUrl { get; set; }
     public int MissingCount { get; set; }
     public int TotalEpisodes { get; set; }
     public List<MissingEpisode> Missing { get; set; } = new();
