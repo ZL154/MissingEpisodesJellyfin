@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Missing Episodes</title>
+</head>
+<body>
+<div id="missingEpisodesPage"
+     data-role="page"
+     class="page type-interior pluginConfigurationPage"
+     data-require="emby-input,emby-button,emby-select,emby-checkbox">
+    <div data-role="content">
+        <div class="content-primary">
+
+<style>
+.me-wrap { --me-accent: #00a4dc; --me-danger: #e35d5b; --me-warn: #f0ad4e; --me-bg-soft: rgba(255,255,255,0.04); --me-border: rgba(255,255,255,0.10); --me-text-dim: rgba(255,255,255,0.65); color-scheme: dark light; }
+.me-wrap * { box-sizing: border-box; }
+.me-wrap { display: block; padding-bottom: 4rem; }
+.me-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; padding: 1.25rem 0 1rem; border-bottom: 1px solid var(--me-border); margin-bottom: 1.25rem; flex-wrap: wrap; }
+.me-hero h1 { margin: 0; font-size: 1.6rem; font-weight: 500; letter-spacing: .3px; }
+.me-hero p { margin: .35rem 0 0; color: var(--me-text-dim); font-size: .9rem; }
+.me-hero-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+.me-btn { border: 1px solid var(--me-border); background: var(--me-bg-soft); color: inherit; padding: .6rem 1rem; border-radius: 6px; cursor: pointer; font-size: .85rem; font-weight: 500; letter-spacing: .3px; transition: background .15s, border-color .15s, transform .05s; }
+.me-btn:hover { background: rgba(255,255,255,0.08); }
+.me-btn:active { transform: translateY(1px); }
+.me-btn[disabled] { opacity: .5; cursor: not-allowed; }
+.me-btn.primary { background: var(--me-accent); border-color: var(--me-accent); color: #fff; }
+.me-btn.primary:hover { background: #1bb2e4; }
+.me-btn.subtle { background: transparent; }
+.me-btn.danger { color: var(--me-danger); border-color: rgba(227,93,91,0.35); }
+.me-card { background: var(--me-bg-soft); border: 1px solid var(--me-border); border-radius: 10px; padding: 1.1rem 1.25rem; margin-bottom: 1.25rem; }
+.me-card h2 { margin: 0 0 .9rem; font-size: 1.05rem; font-weight: 500; display: flex; align-items: center; justify-content: space-between; }
+.me-grid-cfg { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: .9rem 1.3rem; }
+.me-field { display: flex; flex-direction: column; gap: .3rem; font-size: .85rem; }
+.me-field label { color: var(--me-text-dim); font-weight: 500; }
+.me-field input[type=text], .me-field input[type=password], .me-field input[type=number], .me-field select { background: rgba(0,0,0,0.25); border: 1px solid var(--me-border); border-radius: 5px; padding: .55rem .7rem; color: inherit; font-size: .9rem; }
+.me-field input:focus, .me-field select:focus { outline: none; border-color: var(--me-accent); }
+.me-toggle-row { display: flex; flex-wrap: wrap; gap: .5rem 1.25rem; margin-top: .25rem; }
+.me-toggle { display: inline-flex; align-items: center; gap: .4rem; cursor: pointer; font-size: .85rem; user-select: none; }
+.me-toggle input { accent-color: var(--me-accent); }
+.me-segment { display: inline-flex; border: 1px solid var(--me-border); border-radius: 6px; overflow: hidden; }
+.me-segment button { background: transparent; border: 0; padding: .45rem .9rem; color: inherit; cursor: pointer; font-size: .82rem; }
+.me-segment button.active { background: var(--me-accent); color: #fff; }
+
+.me-summary { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; margin-bottom: 1rem; }
+.me-stat { background: var(--me-bg-soft); border: 1px solid var(--me-border); border-radius: 8px; padding: .65rem 1rem; display: flex; flex-direction: column; gap: .1rem; min-width: 120px; }
+.me-stat .v { font-size: 1.35rem; font-weight: 600; }
+.me-stat .k { font-size: .72rem; text-transform: uppercase; letter-spacing: 1px; color: var(--me-text-dim); }
+.me-filters { margin-left: auto; display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+.me-filters input[type=search] { background: rgba(0,0,0,0.25); border: 1px solid var(--me-border); border-radius: 5px; padding: .5rem .7rem; color: inherit; font-size: .85rem; min-width: 200px; }
+
+.me-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 1rem; }
+.me-show { position: relative; border-radius: 10px; overflow: hidden; cursor: pointer; background: #111; border: 1px solid var(--me-border); transition: transform .12s ease, border-color .12s ease; display: flex; flex-direction: column; }
+.me-show:hover { transform: translateY(-2px); border-color: var(--me-accent); }
+.me-poster { position: relative; width: 100%; padding-top: 148%; background: #222 center/cover no-repeat; }
+.me-poster .me-ph { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.3); font-size: 1.1rem; text-align: center; padding: 1rem; }
+.me-badge { position: absolute; top: .5rem; right: .5rem; background: var(--me-danger); color: #fff; font-weight: 600; font-size: .75rem; padding: .2rem .5rem; border-radius: 100px; box-shadow: 0 2px 8px rgba(0,0,0,0.5); }
+.me-badge.low { background: var(--me-warn); }
+.me-show-meta { padding: .5rem .6rem .7rem; }
+.me-show-meta .t { font-size: .85rem; font-weight: 500; line-height: 1.2; margin: 0 0 .2rem; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; min-height: 2.05em; }
+.me-show-meta .s { font-size: .72rem; color: var(--me-text-dim); }
+
+.me-empty { padding: 3rem 1rem; text-align: center; color: var(--me-text-dim); }
+.me-empty.big { padding: 4.5rem 1rem; }
+.me-spinner { display: inline-block; width: 1em; height: 1em; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: me-spin .8s linear infinite; vertical-align: -0.15em; }
+@keyframes me-spin { to { transform: rotate(360deg); } }
+
+.me-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.75); display: none; align-items: center; justify-content: center; z-index: 10000; padding: 1rem; }
+.me-modal.open { display: flex; }
+.me-modal-card { background: #1c1c1c; border: 1px solid var(--me-border); border-radius: 12px; width: 100%; max-width: 780px; max-height: 90vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
+.me-modal-hero { padding: 1.1rem 1.25rem; border-bottom: 1px solid var(--me-border); display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+.me-modal-hero .t { font-size: 1.2rem; font-weight: 500; margin: 0 0 .2rem; }
+.me-modal-hero .s { font-size: .8rem; color: var(--me-text-dim); }
+.me-modal-body { overflow-y: auto; padding: 0 1.25rem 1rem; }
+.me-modal-foot { padding: .9rem 1.25rem; border-top: 1px solid var(--me-border); display: flex; gap: .5rem; justify-content: flex-end; flex-wrap: wrap; }
+.me-season { margin-top: 1rem; }
+.me-season h3 { margin: 0 0 .4rem; font-size: .95rem; font-weight: 500; color: var(--me-text-dim); text-transform: uppercase; letter-spacing: .8px; }
+.me-ep { display: flex; align-items: center; justify-content: space-between; padding: .55rem .6rem; border: 1px solid var(--me-border); border-radius: 6px; margin-bottom: .4rem; gap: .7rem; background: rgba(255,255,255,0.02); }
+.me-ep .n { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .78rem; color: var(--me-text-dim); min-width: 3.4em; }
+.me-ep .ti { flex: 1; font-size: .88rem; }
+.me-ep .a { font-size: .72rem; color: var(--me-text-dim); white-space: nowrap; }
+.me-ep button { background: transparent; border: 1px solid var(--me-border); color: inherit; padding: .32rem .65rem; font-size: .75rem; border-radius: 5px; cursor: pointer; }
+.me-ep button:hover { background: var(--me-accent); border-color: var(--me-accent); color: #fff; }
+.me-ep.searched { opacity: .55; }
+
+.me-toast { position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%); background: #222; border: 1px solid var(--me-border); padding: .7rem 1.1rem; border-radius: 8px; font-size: .85rem; box-shadow: 0 10px 30px rgba(0,0,0,0.4); z-index: 10001; max-width: 80vw; opacity: 0; pointer-events: none; transition: opacity .2s; }
+.me-toast.show { opacity: 1; }
+.me-toast.err { border-color: var(--me-danger); }
+</style>
+
+<div class="me-wrap">
+
+  <div class="me-hero">
+    <div>
+      <h1>Missing Episodes</h1>
+      <p>Find gaps in your Jellyfin library and send them to Sonarr.</p>
+    </div>
+    <div class="me-hero-actions">
+      <button type="button" class="me-btn" id="meCfgToggle">Settings</button>
+      <button type="button" class="me-btn primary" id="meScanBtn">Scan now</button>
+    </div>
+  </div>
+
+  <div class="me-card" id="meCfgCard" style="display:none;">
+    <h2>Configuration</h2>
+    <div class="me-grid-cfg">
+      <div class="me-field">
+        <label for="meSonarrUrl">Sonarr URL</label>
+        <input type="text" id="meSonarrUrl" placeholder="http://sonarr.local:8989" />
+      </div>
+      <div class="me-field">
+        <label for="meSonarrKey">API key</label>
+        <input type="password" id="meSonarrKey" placeholder="Sonarr -> Settings -> General" autocomplete="new-password" />
+      </div>
+      <div class="me-field">
+        <label>Scan source</label>
+        <div class="me-segment" id="meSourceSeg">
+          <button type="button" data-v="sonarr" class="active">Sonarr library</button>
+          <button type="button" data-v="jellyfin">Jellyfin library</button>
+        </div>
+      </div>
+      <div class="me-field">
+        <label for="meInterval">Auto-search every (hours)</label>
+        <input type="number" id="meInterval" min="1" max="720" step="1" value="24" />
+      </div>
+    </div>
+
+    <div class="me-toggle-row" style="margin-top:1rem;">
+      <label class="me-toggle"><input type="checkbox" id="meAutoSearch" /> Send missing episodes to Sonarr automatically</label>
+      <label class="me-toggle"><input type="checkbox" id="meOnlyMonitored" /> Only monitored</label>
+      <label class="me-toggle"><input type="checkbox" id="meIgnoreSpecials" /> Ignore specials (season 0)</label>
+      <label class="me-toggle"><input type="checkbox" id="meIgnoreUnaired" /> Ignore unaired</label>
+    </div>
+
+    <div style="display:flex;gap:.5rem;margin-top:1.1rem;flex-wrap:wrap;">
+      <button type="button" class="me-btn" id="meTestBtn">Test connection</button>
+      <button type="button" class="me-btn primary" id="meSaveBtn">Save</button>
+      <span id="meCfgStatus" style="align-self:center;font-size:.85rem;color:var(--me-text-dim);"></span>
+    </div>
+  </div>
+
+  <div class="me-summary">
+    <div class="me-stat"><span class="v" id="meStatShows">—</span><span class="k">Shows</span></div>
+    <div class="me-stat"><span class="v" id="meStatMissing">—</span><span class="k">Missing episodes</span></div>
+    <div class="me-stat"><span class="v" id="meStatSource">—</span><span class="k">Source</span></div>
+    <div class="me-stat"><span class="v" id="meStatTime">—</span><span class="k">Last scan</span></div>
+    <div class="me-filters">
+      <input type="search" id="meSearch" placeholder="Filter shows" />
+      <div class="me-segment" id="meSortSeg">
+        <button type="button" data-v="count" class="active">Most missing</button>
+        <button type="button" data-v="title">Title</button>
+        <button type="button" data-v="recent">Recently aired</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="meGrid" class="me-grid"></div>
+  <div id="meEmpty" class="me-empty big" style="display:none;">
+    No scan yet. Click <strong>Scan now</strong> to check your library against Sonarr.
+  </div>
+
+</div>
+
+<div class="me-modal" id="meModal">
+  <div class="me-modal-card">
+    <div class="me-modal-hero">
+      <div>
+        <h3 class="t" id="meModalTitle"></h3>
+        <div class="s" id="meModalSub"></div>
+      </div>
+      <button type="button" class="me-btn subtle" id="meModalClose" aria-label="Close">Close</button>
+    </div>
+    <div class="me-modal-body" id="meModalBody"></div>
+    <div class="me-modal-foot">
+      <button type="button" class="me-btn danger" id="meIgnoreBtn">Ignore this show</button>
+      <button type="button" class="me-btn" id="meSearchAllBtn">Search all missing</button>
+    </div>
+  </div>
+</div>
+
+<div class="me-toast" id="meToast"></div>
+
+<script type="text/javascript">
+(function () {
+    var PLUGIN_ID = 'b7a24c68-7f3e-4c0a-9a9e-6e2b9e1a4f33';
+    var page = document.querySelector('#missingEpisodesPage');
+    var state = { result: null, filtered: [], current: null, cfg: null, sort: 'count', query: '' };
+
+    function $(sel) { return page.querySelector(sel); }
+    function $all(sel) { return page.querySelectorAll(sel); }
+
+    function toast(msg, isErr) {
+        var t = $('#meToast');
+        t.textContent = msg;
+        t.classList.toggle('err', !!isErr);
+        t.classList.add('show');
+        clearTimeout(t._h);
+        t._h = setTimeout(function () { t.classList.remove('show'); }, 2800);
+    }
+
+    function escapeHtml(s) {
+        if (s == null) return '';
+        return String(s).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+
+    function formatRelative(iso) {
+        if (!iso) return 'Never';
+        var d = new Date(iso); if (isNaN(d)) return 'Never';
+        var diff = (Date.now() - d.getTime()) / 1000;
+        if (diff < 60) return 'Just now';
+        if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+        if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+        return Math.floor(diff / 86400) + 'd ago';
+    }
+
+    function request(url, opts) {
+        opts = opts || {};
+        opts.url = ApiClient.getUrl(url);
+        opts.dataType = opts.dataType || 'json';
+        opts.contentType = opts.contentType || 'application/json';
+        return ApiClient.ajax(opts);
+    }
+
+    function loadConfig() {
+        Dashboard.showLoadingMsg();
+        return ApiClient.getPluginConfiguration(PLUGIN_ID).then(function (cfg) {
+            state.cfg = cfg;
+            $('#meSonarrUrl').value = cfg.SonarrUrl || '';
+            $('#meSonarrKey').value = cfg.SonarrApiKey || '';
+            $('#meInterval').value = cfg.AutoSearchIntervalHours || 24;
+            $('#meAutoSearch').checked = !!cfg.AutoSearchEnabled;
+            $('#meOnlyMonitored').checked = cfg.OnlyMonitored !== false;
+            $('#meIgnoreSpecials').checked = cfg.IgnoreSpecials !== false;
+            $('#meIgnoreUnaired').checked = cfg.IgnoreUnaired !== false;
+            setSeg('#meSourceSeg', cfg.ScanSource || 'sonarr');
+            Dashboard.hideLoadingMsg();
+        });
+    }
+
+    function setSeg(sel, v) {
+        $all(sel + ' button').forEach(function (b) {
+            b.classList.toggle('active', b.getAttribute('data-v') === v);
+        });
+    }
+
+    function getSeg(sel) {
+        var a = $(sel + ' button.active');
+        return a ? a.getAttribute('data-v') : null;
+    }
+
+    function saveConfig() {
+        Dashboard.showLoadingMsg();
+        state.cfg.SonarrUrl = $('#meSonarrUrl').value.trim();
+        state.cfg.SonarrApiKey = $('#meSonarrKey').value.trim();
+        state.cfg.ScanSource = getSeg('#meSourceSeg') || 'sonarr';
+        state.cfg.AutoSearchEnabled = $('#meAutoSearch').checked;
+        state.cfg.OnlyMonitored = $('#meOnlyMonitored').checked;
+        state.cfg.IgnoreSpecials = $('#meIgnoreSpecials').checked;
+        state.cfg.IgnoreUnaired = $('#meIgnoreUnaired').checked;
+        var iv = parseInt($('#meInterval').value, 10);
+        state.cfg.AutoSearchIntervalHours = (isNaN(iv) || iv < 1) ? 24 : iv;
+        return ApiClient.updatePluginConfiguration(PLUGIN_ID, state.cfg).then(function () {
+            Dashboard.hideLoadingMsg();
+            toast('Settings saved');
+        });
+    }
+
+    function testConnection() {
+        var body = JSON.stringify({
+            url: $('#meSonarrUrl').value.trim(),
+            apiKey: $('#meSonarrKey').value.trim()
+        });
+        $('#meCfgStatus').textContent = 'Testing...';
+        return request('Plugins/MissingEpisodes/test', { type: 'POST', data: body }).then(function (r) {
+            if (r.ok) { $('#meCfgStatus').textContent = 'Connected.'; toast('Connected to Sonarr'); }
+            else { $('#meCfgStatus').textContent = 'Failed: ' + (r.error || 'unknown'); toast('Connection failed: ' + (r.error || 'unknown'), true); }
+        }).catch(function () {
+            $('#meCfgStatus').textContent = 'Request failed.';
+            toast('Request failed', true);
+        });
+    }
+
+    function scan() {
+        var btn = $('#meScanBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="me-spinner"></span> Scanning';
+        return request('Plugins/MissingEpisodes/scan', { type: 'POST', data: '{}' })
+            .then(function (r) { state.result = r; render(); toast('Scan complete'); })
+            .catch(function (e) {
+                var msg = 'Scan failed';
+                try { var t = JSON.parse(e.responseText || '{}'); if (t.error) msg = t.error; } catch (_) {}
+                toast(msg, true);
+            })
+            .finally(function () {
+                btn.disabled = false;
+                btn.textContent = 'Scan now';
+            });
+    }
+
+    function loadLast() {
+        return request('Plugins/MissingEpisodes/last').then(function (r) {
+            if (r && r.empty) { $('#meEmpty').style.display = 'block'; return; }
+            state.result = r; render();
+        });
+    }
+
+    function render() {
+        var r = state.result;
+        if (!r) { $('#meEmpty').style.display = 'block'; return; }
+        $('#meEmpty').style.display = 'none';
+        $('#meStatShows').textContent = r.Series.length;
+        $('#meStatMissing').textContent = r.TotalMissing;
+        $('#meStatSource').textContent = r.Source === 'jellyfin' ? 'Jellyfin' : 'Sonarr';
+        $('#meStatTime').textContent = formatRelative(r.ScannedAtUtc);
+        applyFilters();
+    }
+
+    function applyFilters() {
+        if (!state.result) return;
+        var q = state.query.trim().toLowerCase();
+        var list = state.result.Series.filter(function (s) {
+            return !q || s.Title.toLowerCase().indexOf(q) !== -1;
+        });
+        if (state.sort === 'title') {
+            list.sort(function (a, b) { return a.Title.localeCompare(b.Title); });
+        } else if (state.sort === 'recent') {
+            list.sort(function (a, b) {
+                var am = Math.max.apply(null, a.Missing.map(function (m) { return m.AirDateUtc ? Date.parse(m.AirDateUtc) : 0; }).concat(0));
+                var bm = Math.max.apply(null, b.Missing.map(function (m) { return m.AirDateUtc ? Date.parse(m.AirDateUtc) : 0; }).concat(0));
+                return bm - am;
+            });
+        } else {
+            list.sort(function (a, b) { return b.MissingCount - a.MissingCount; });
+        }
+        state.filtered = list;
+        renderGrid();
+    }
+
+    function renderGrid() {
+        var g = $('#meGrid');
+        if (!state.filtered.length) {
+            g.innerHTML = '<div class="me-empty" style="grid-column:1/-1;">Nothing missing. Your library is complete.</div>';
+            return;
+        }
+        var html = state.filtered.map(function (s, idx) {
+            var poster = s.PosterUrl
+                ? '<div class="me-poster" style="background-image:url(\'' + escapeHtml(s.PosterUrl) + '\');"></div>'
+                : '<div class="me-poster"><div class="me-ph">' + escapeHtml(s.Title) + '</div></div>';
+            var low = s.MissingCount <= 2;
+            return '<div class="me-show" data-i="' + idx + '">'
+                + poster
+                + '<span class="me-badge' + (low ? ' low' : '') + '">' + s.MissingCount + ' missing</span>'
+                + '<div class="me-show-meta">'
+                + '<div class="t">' + escapeHtml(s.Title) + '</div>'
+                + '<div class="s">' + (s.Year || '') + (s.Network ? ' · ' + escapeHtml(s.Network) : '') + '</div>'
+                + '</div></div>';
+        }).join('');
+        g.innerHTML = html;
+        g.querySelectorAll('.me-show').forEach(function (el) {
+            el.addEventListener('click', function () {
+                openShow(state.filtered[parseInt(el.getAttribute('data-i'), 10)]);
+            });
+        });
+    }
+
+    function openShow(s) {
+        state.current = s;
+        $('#meModalTitle').textContent = s.Title + (s.Year ? ' (' + s.Year + ')' : '');
+        $('#meModalSub').textContent = s.MissingCount + ' missing · '
+            + (s.Network ? s.Network + ' · ' : '')
+            + (s.Status || '');
+        var bySeason = {};
+        s.Missing.forEach(function (ep) {
+            (bySeason[ep.SeasonNumber] = bySeason[ep.SeasonNumber] || []).push(ep);
+        });
+        var seasons = Object.keys(bySeason).map(Number).sort(function (a, b) { return a - b; });
+        var body = seasons.map(function (sn) {
+            var eps = bySeason[sn].sort(function (a, b) { return a.EpisodeNumber - b.EpisodeNumber; });
+            var h = '<div class="me-season"><h3>' + (sn === 0 ? 'Specials' : 'Season ' + sn) + '</h3>';
+            h += eps.map(function (ep) {
+                var air = ep.AirDateUtc ? new Date(ep.AirDateUtc).toLocaleDateString() : '—';
+                var code = 'S' + String(sn).padStart(2, '0') + 'E' + String(ep.EpisodeNumber).padStart(2, '0');
+                return '<div class="me-ep" data-id="' + ep.Id + '">'
+                    + '<span class="n">' + code + '</span>'
+                    + '<span class="ti">' + escapeHtml(ep.Title || '(untitled)') + '</span>'
+                    + '<span class="a">' + air + '</span>'
+                    + '<button type="button" data-id="' + ep.Id + '">Search</button>'
+                    + '</div>';
+            }).join('');
+            return h + '</div>';
+        }).join('');
+        $('#meModalBody').innerHTML = body;
+        $('#meModalBody').querySelectorAll('button[data-id]').forEach(function (b) {
+            b.addEventListener('click', function () {
+                var id = parseInt(b.getAttribute('data-id'), 10);
+                searchEpisodes([id], b.closest('.me-ep'));
+            });
+        });
+        $('#meModal').classList.add('open');
+    }
+
+    function closeModal() { $('#meModal').classList.remove('open'); state.current = null; }
+
+    function searchEpisodes(ids, rowEl) {
+        return request('Plugins/MissingEpisodes/search', {
+            type: 'POST',
+            data: JSON.stringify({ episodeIds: ids })
+        }).then(function (r) {
+            toast('Searching ' + (r.sent || ids.length) + ' episode(s)');
+            if (rowEl) rowEl.classList.add('searched');
+            else if (state.current) {
+                $('#meModalBody').querySelectorAll('.me-ep').forEach(function (el) { el.classList.add('searched'); });
+            }
+        }).catch(function () { toast('Search request failed', true); });
+    }
+
+    function ignoreShow() {
+        if (!state.current) return;
+        var id = state.current.TvdbId;
+        return request('Plugins/MissingEpisodes/series/' + id + '/ignore', { type: 'POST', dataType: 'text', data: '' })
+            .then(function () {
+                toast('Added to ignore list');
+                state.result.Series = state.result.Series.filter(function (x) { return x.TvdbId !== id; });
+                state.result.TotalMissing = state.result.Series.reduce(function (a, b) { return a + b.MissingCount; }, 0);
+                closeModal();
+                render();
+            });
+    }
+
+    // Wire events
+    page.addEventListener('viewshow', function () { loadConfig().then(loadLast); });
+    page.addEventListener('pageshow', function () { loadConfig().then(loadLast); });
+
+    $('#meCfgToggle').addEventListener('click', function () {
+        var c = $('#meCfgCard');
+        c.style.display = c.style.display === 'none' ? 'block' : 'none';
+    });
+    $('#meTestBtn').addEventListener('click', testConnection);
+    $('#meSaveBtn').addEventListener('click', saveConfig);
+    $('#meScanBtn').addEventListener('click', scan);
+    $('#meSourceSeg').addEventListener('click', function (e) {
+        if (e.target.tagName === 'BUTTON') setSeg('#meSourceSeg', e.target.getAttribute('data-v'));
+    });
+    $('#meSortSeg').addEventListener('click', function (e) {
+        if (e.target.tagName === 'BUTTON') {
+            state.sort = e.target.getAttribute('data-v');
+            setSeg('#meSortSeg', state.sort);
+            applyFilters();
+        }
+    });
+    $('#meSearch').addEventListener('input', function (e) { state.query = e.target.value || ''; applyFilters(); });
+    $('#meModalClose').addEventListener('click', closeModal);
+    $('#meModal').addEventListener('click', function (e) { if (e.target === $('#meModal')) closeModal(); });
+    $('#meSearchAllBtn').addEventListener('click', function () {
+        if (!state.current) return;
+        var ids = state.current.Missing.map(function (m) { return m.Id; });
+        searchEpisodes(ids, null);
+    });
+    $('#meIgnoreBtn').addEventListener('click', ignoreShow);
+
+    // Initial load (in case view events don't fire)
+    loadConfig().then(loadLast);
+})();
+</script>
+
+        </div>
+    </div>
+</div>
+</body>
+</html>
