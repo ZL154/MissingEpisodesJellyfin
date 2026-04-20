@@ -69,7 +69,7 @@ public class SonarrClient
     {
         using var client = CreateClient(baseUrl, apiKey);
         var result = await client.GetFromJsonAsync<List<SonarrEpisode>>(
-            $"api/v3/episode?seriesId={seriesId}", JsonOptions, ct).ConfigureAwait(false);
+            $"api/v3/episode?seriesId={seriesId}&includeImages=true", JsonOptions, ct).ConfigureAwait(false);
         return result ?? new List<SonarrEpisode>();
     }
 

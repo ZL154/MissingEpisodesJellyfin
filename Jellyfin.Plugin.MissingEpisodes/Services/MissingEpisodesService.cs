@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -33,118 +32,41 @@ public class MissingEpisodesService
 
     public ScanResult? LastResult => _lastResult;
 
+    public static bool IsSonarrConfigured(PluginConfiguration cfg)
+        => !string.IsNullOrWhiteSpace(cfg.SonarrUrl) && !string.IsNullOrWhiteSpace(cfg.SonarrApiKey);
+
     public async Task<ScanResult> ScanAsync(CancellationToken ct = default)
     {
         var cfg = Plugin.Instance?.Configuration
             ?? throw new InvalidOperationException("Plugin not initialized.");
 
-        if (string.IsNullOrWhiteSpace(cfg.SonarrUrl) || string.IsNullOrWhiteSpace(cfg.SonarrApiKey))
+        var useJellyfin = string.Equals(cfg.ScanSource, "jellyfin", StringComparison.OrdinalIgnoreCase);
+        var sonarrReady = IsSonarrConfigured(cfg);
+
+        if (!useJellyfin && !sonarrReady)
         {
-            throw new InvalidOperationException("Sonarr URL and API key must be configured.");
+            throw new InvalidOperationException(
+                "Sonarr scans need a URL and API key. Switch the scan source to Jellyfin, or add your Sonarr credentials.");
         }
 
         await _scanLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            var ignored = new HashSet<int>(cfg.IgnoredSeriesTvdbIds);
-            var allSeries = await _sonarr.GetSeriesAsync(cfg.SonarrUrl, cfg.SonarrApiKey, ct).ConfigureAwait(false);
-
-            Dictionary<int, HashSet<(int season, int episode)>>? jellyfinPresent = null;
-            if (string.Equals(cfg.ScanSource, "jellyfin", StringComparison.OrdinalIgnoreCase))
+            ScanResult result;
+            if (useJellyfin)
             {
-                jellyfinPresent = BuildJellyfinPresentMap();
+                result = ScanJellyfinOnly(cfg);
+                if (sonarrReady)
+                {
+                    await EnrichWithSonarrIdsAsync(cfg, result, ct).ConfigureAwait(false);
+                }
+            }
+            else
+            {
+                result = await ScanSonarrAsync(cfg, ct).ConfigureAwait(false);
             }
 
-            var now = DateTime.UtcNow;
-            var result = new ScanResult
-            {
-                ScannedAtUtc = now,
-                Source = cfg.ScanSource,
-                Series = new List<ScanSeries>()
-            };
-
-            foreach (var s in allSeries)
-            {
-                if (ignored.Contains(s.TvdbId)) continue;
-                if (cfg.OnlyMonitored && !s.Monitored) continue;
-
-                List<SonarrEpisode> eps;
-                try
-                {
-                    eps = await _sonarr.GetEpisodesAsync(cfg.SonarrUrl, cfg.SonarrApiKey, s.Id, ct).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to fetch episodes for series {Title}", s.Title);
-                    continue;
-                }
-
-                var missing = new List<MissingEpisode>();
-                HashSet<(int, int)>? presentForSeries = null;
-                if (jellyfinPresent != null)
-                {
-                    jellyfinPresent.TryGetValue(s.TvdbId, out presentForSeries);
-                }
-
-                foreach (var ep in eps)
-                {
-                    if (cfg.IgnoreSpecials && ep.SeasonNumber == 0) continue;
-                    if (cfg.OnlyMonitored && !ep.Monitored) continue;
-                    if (cfg.IgnoreUnaired && (ep.AirDateUtc == null || ep.AirDateUtc > now)) continue;
-
-                    bool isMissing;
-                    if (jellyfinPresent != null)
-                    {
-                        isMissing = presentForSeries == null
-                            || !presentForSeries.Contains((ep.SeasonNumber, ep.EpisodeNumber));
-                    }
-                    else
-                    {
-                        isMissing = !ep.HasFile;
-                    }
-
-                    if (!isMissing) continue;
-
-                    missing.Add(new MissingEpisode
-                    {
-                        Id = ep.Id,
-                        SeasonNumber = ep.SeasonNumber,
-                        EpisodeNumber = ep.EpisodeNumber,
-                        Title = ep.Title,
-                        AirDateUtc = ep.AirDateUtc,
-                        Overview = ep.Overview,
-                        FinaleType = ep.FinaleType
-                    });
-                }
-
-                if (missing.Count == 0) continue;
-
-                var poster = PickImage(s.Images, "poster");
-                var banner = PickImage(s.Images, "banner");
-                var fanart = PickImage(s.Images, "fanart");
-
-                result.Series.Add(new ScanSeries
-                {
-                    SonarrId = s.Id,
-                    TvdbId = s.TvdbId,
-                    Title = s.Title,
-                    Year = s.Year,
-                    Network = s.Network,
-                    Status = s.Status,
-                    PosterUrl = poster,
-                    BackdropUrl = fanart ?? banner,
-                    MissingCount = missing.Count,
-                    TotalEpisodes = s.Statistics?.TotalEpisodeCount ?? eps.Count,
-                    Missing = missing
-                });
-            }
-
-            result.TotalMissing = result.Series.Sum(x => x.MissingCount);
-            result.Series = result.Series
-                .OrderByDescending(x => x.MissingCount)
-                .ThenBy(x => x.Title, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
+            result.SonarrConfigured = sonarrReady;
             _lastResult = result;
             cfg.LastScanIso = result.ScannedAtUtc.ToString("o");
             Plugin.Instance?.SaveConfiguration();
@@ -156,11 +78,94 @@ public class MissingEpisodesService
         }
     }
 
-    // Build a map of TvdbId -> set of (season, episode) tuples present in the Jellyfin library,
-    // expanding multi-episode files via IndexNumberEnd so a file covering E01-E02 counts both.
-    private Dictionary<int, HashSet<(int, int)>> BuildJellyfinPresentMap()
+    private async Task<ScanResult> ScanSonarrAsync(PluginConfiguration cfg, CancellationToken ct)
     {
-        var map = new Dictionary<int, HashSet<(int, int)>>();
+        var ignored = new HashSet<int>(cfg.IgnoredSeriesTvdbIds);
+        var allSeries = await _sonarr.GetSeriesAsync(cfg.SonarrUrl, cfg.SonarrApiKey, ct).ConfigureAwait(false);
+        var now = DateTime.UtcNow;
+
+        var jellyfinByTvdb = BuildJellyfinIndex();
+
+        var result = new ScanResult
+        {
+            ScannedAtUtc = now,
+            Source = "sonarr",
+            Series = new List<ScanSeries>()
+        };
+
+        foreach (var s in allSeries)
+        {
+            if (ignored.Contains(s.TvdbId)) continue;
+            if (cfg.OnlyMonitored && !s.Monitored) continue;
+
+            List<SonarrEpisode> eps;
+            try
+            {
+                eps = await _sonarr.GetEpisodesAsync(cfg.SonarrUrl, cfg.SonarrApiKey, s.Id, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to fetch episodes for series {Title}", s.Title);
+                continue;
+            }
+
+            var missing = new List<MissingEpisode>();
+            foreach (var ep in eps)
+            {
+                if (cfg.IgnoreSpecials && ep.SeasonNumber == 0) continue;
+                if (cfg.OnlyMonitored && !ep.Monitored) continue;
+                if (cfg.IgnoreUnaired && (ep.AirDateUtc == null || ep.AirDateUtc > now)) continue;
+                if (ep.HasFile) continue;
+
+                missing.Add(new MissingEpisode
+                {
+                    Id = ep.Id,
+                    SeasonNumber = ep.SeasonNumber,
+                    EpisodeNumber = ep.EpisodeNumber,
+                    Title = ep.Title,
+                    AirDateUtc = ep.AirDateUtc,
+                    Overview = ep.Overview,
+                    FinaleType = ep.FinaleType,
+                    ThumbnailUrl = PickImage(ep.Images, "screenshot")
+                });
+            }
+
+            if (missing.Count == 0) continue;
+
+            jellyfinByTvdb.TryGetValue(s.TvdbId, out var jfId);
+
+            result.Series.Add(new ScanSeries
+            {
+                SonarrId = s.Id,
+                TvdbId = s.TvdbId,
+                JellyfinSeriesId = jfId,
+                Title = s.Title,
+                Year = s.Year,
+                Network = s.Network,
+                Status = s.Status,
+                PosterUrl = PickImage(s.Images, "poster"),
+                BackdropUrl = PickImage(s.Images, "fanart") ?? PickImage(s.Images, "banner"),
+                MissingCount = missing.Count,
+                TotalEpisodes = s.Statistics?.TotalEpisodeCount ?? eps.Count,
+                Missing = missing
+            });
+        }
+
+        FinalizeResult(result);
+        return result;
+    }
+
+    private ScanResult ScanJellyfinOnly(PluginConfiguration cfg)
+    {
+        var now = DateTime.UtcNow;
+        var result = new ScanResult
+        {
+            ScannedAtUtc = now,
+            Source = "jellyfin",
+            Series = new List<ScanSeries>()
+        };
+
+        var ignoredTvdb = new HashSet<int>(cfg.IgnoredSeriesTvdbIds);
 
         var seriesItems = _libraryManager.GetItemList(new InternalItemsQuery
         {
@@ -171,40 +176,151 @@ public class MissingEpisodesService
         foreach (var item in seriesItems)
         {
             if (item is not Series series) continue;
-            var tvdb = series.GetProviderId(MetadataProvider.Tvdb);
-            if (string.IsNullOrEmpty(tvdb) || !int.TryParse(tvdb, out var tvdbId)) continue;
 
-            var episodes = _libraryManager.GetItemList(new InternalItemsQuery
+            var tvdbStr = series.GetProviderId(MetadataProvider.Tvdb);
+            int.TryParse(tvdbStr, out var tvdbId);
+            if (tvdbId > 0 && ignoredTvdb.Contains(tvdbId)) continue;
+
+            // Jellyfin creates virtual episode items for episodes it knows exist (per metadata provider)
+            // but has no file for — that's our "missing" set.
+            var missingEps = _libraryManager.GetItemList(new InternalItemsQuery
+            {
+                IncludeItemTypes = new[] { BaseItemKind.Episode },
+                AncestorIds = new[] { series.Id },
+                IsVirtualItem = true,
+                Recursive = true
+            });
+
+            var totalEps = _libraryManager.GetItemList(new InternalItemsQuery
             {
                 IncludeItemTypes = new[] { BaseItemKind.Episode },
                 AncestorIds = new[] { series.Id },
                 Recursive = true
-            });
+            }).Count;
 
-            if (!map.TryGetValue(tvdbId, out var set))
+            var missing = new List<MissingEpisode>();
+            foreach (var e in missingEps)
             {
-                set = new HashSet<(int, int)>();
-                map[tvdbId] = set;
+                if (e is not Episode episode) continue;
+                var season = episode.ParentIndexNumber;
+                var num = episode.IndexNumber;
+                if (!season.HasValue || !num.HasValue) continue;
+                if (cfg.IgnoreSpecials && season.Value == 0) continue;
+
+                var air = episode.PremiereDate;
+                if (cfg.IgnoreUnaired && (!air.HasValue || air.Value.ToUniversalTime() > now)) continue;
+
+                var jfEpId = episode.Id.ToString("N");
+                missing.Add(new MissingEpisode
+                {
+                    Id = 0,
+                    SeasonNumber = season.Value,
+                    EpisodeNumber = num.Value,
+                    Title = episode.Name,
+                    AirDateUtc = air?.ToUniversalTime(),
+                    Overview = episode.Overview,
+                    JellyfinEpisodeId = jfEpId,
+                    ThumbnailUrl = "jellyfin:" + jfEpId // prefix tells the UI to resolve via ApiClient
+                });
             }
 
-            foreach (var e in episodes)
+            if (missing.Count == 0) continue;
+
+            var jfSeriesId = series.Id.ToString("N");
+            result.Series.Add(new ScanSeries
             {
-                if (e is not Episode ep) continue;
-                var season = ep.ParentIndexNumber;
-                var start = ep.IndexNumber;
-                if (!season.HasValue || !start.HasValue) continue;
-                var end = ep.IndexNumberEnd ?? start.Value;
-                for (var n = start.Value; n <= end; n++)
+                SonarrId = 0,
+                TvdbId = tvdbId,
+                JellyfinSeriesId = jfSeriesId,
+                Title = series.Name,
+                Year = series.ProductionYear ?? 0,
+                Network = series.Studios?.FirstOrDefault(),
+                Status = series.Status?.ToString(),
+                PosterUrl = "jellyfin:" + jfSeriesId,
+                BackdropUrl = "jellyfin-backdrop:" + jfSeriesId,
+                MissingCount = missing.Count,
+                TotalEpisodes = totalEps,
+                Missing = missing
+            });
+        }
+
+        FinalizeResult(result);
+        return result;
+    }
+
+    private async Task EnrichWithSonarrIdsAsync(PluginConfiguration cfg, ScanResult result, CancellationToken ct)
+    {
+        try
+        {
+            var sonarrSeries = await _sonarr.GetSeriesAsync(cfg.SonarrUrl, cfg.SonarrApiKey, ct).ConfigureAwait(false);
+            var byTvdb = sonarrSeries
+                .Where(x => x.TvdbId > 0)
+                .GroupBy(x => x.TvdbId)
+                .ToDictionary(g => g.Key, g => g.First());
+
+            foreach (var s in result.Series)
+            {
+                if (s.TvdbId <= 0 || !byTvdb.TryGetValue(s.TvdbId, out var sonarrS)) continue;
+                s.SonarrId = sonarrS.Id;
+
+                List<SonarrEpisode> eps;
+                try
                 {
-                    set.Add((season.Value, n));
+                    eps = await _sonarr.GetEpisodesAsync(cfg.SonarrUrl, cfg.SonarrApiKey, sonarrS.Id, ct).ConfigureAwait(false);
+                }
+                catch
+                {
+                    continue;
+                }
+                var epIndex = new Dictionary<(int, int), SonarrEpisode>();
+                foreach (var e in eps) epIndex[(e.SeasonNumber, e.EpisodeNumber)] = e;
+
+                foreach (var m in s.Missing)
+                {
+                    if (epIndex.TryGetValue((m.SeasonNumber, m.EpisodeNumber), out var se))
+                    {
+                        m.Id = se.Id;
+                        // Prefer Sonarr's screenshot when we have one, over the Jellyfin virtual episode thumb.
+                        var shot = PickImage(se.Images, "screenshot");
+                        if (!string.IsNullOrEmpty(shot)) m.ThumbnailUrl = shot;
+                    }
                 }
             }
         }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to enrich Jellyfin scan with Sonarr IDs");
+        }
+    }
 
+    private Dictionary<int, string> BuildJellyfinIndex()
+    {
+        var map = new Dictionary<int, string>();
+        var seriesItems = _libraryManager.GetItemList(new InternalItemsQuery
+        {
+            IncludeItemTypes = new[] { BaseItemKind.Series },
+            Recursive = true
+        });
+        foreach (var item in seriesItems)
+        {
+            if (item is not Series series) continue;
+            var tvdb = series.GetProviderId(MetadataProvider.Tvdb);
+            if (string.IsNullOrEmpty(tvdb) || !int.TryParse(tvdb, out var tvdbId)) continue;
+            map[tvdbId] = series.Id.ToString("N");
+        }
         return map;
     }
 
-    private static string? PickImage(List<Jellyfin.Plugin.MissingEpisodes.Sonarr.SonarrImage>? images, string coverType)
+    private static void FinalizeResult(ScanResult result)
+    {
+        result.TotalMissing = result.Series.Sum(x => x.MissingCount);
+        result.Series = result.Series
+            .OrderByDescending(x => x.MissingCount)
+            .ThenBy(x => x.Title, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string? PickImage(List<SonarrImage>? images, string coverType)
     {
         if (images == null) return null;
         foreach (var img in images)
@@ -220,12 +336,17 @@ public class MissingEpisodesService
     {
         var cfg = Plugin.Instance?.Configuration
             ?? throw new InvalidOperationException("Plugin not initialized.");
+        if (!IsSonarrConfigured(cfg))
+        {
+            throw new InvalidOperationException("Sonarr must be configured to trigger searches.");
+        }
         var batch = cfg.AutoSearchBatchLimit > 0 ? cfg.AutoSearchBatchLimit : 50;
 
         var total = 0;
-        for (var i = 0; i < episodeIds.Count; i += batch)
+        var filtered = episodeIds.Where(id => id > 0).ToList();
+        for (var i = 0; i < filtered.Count; i += batch)
         {
-            var slice = episodeIds.Skip(i).Take(batch).ToList();
+            var slice = filtered.Skip(i).Take(batch).ToList();
             var ok = await _sonarr.TriggerEpisodeSearchAsync(cfg.SonarrUrl, cfg.SonarrApiKey, slice, ct)
                 .ConfigureAwait(false);
             if (ok) total += slice.Count;
@@ -238,6 +359,7 @@ public class ScanResult
 {
     public DateTime ScannedAtUtc { get; set; }
     public string Source { get; set; } = "sonarr";
+    public bool SonarrConfigured { get; set; }
     public int TotalMissing { get; set; }
     public List<ScanSeries> Series { get; set; } = new();
 }
@@ -246,6 +368,7 @@ public class ScanSeries
 {
     public int SonarrId { get; set; }
     public int TvdbId { get; set; }
+    public string? JellyfinSeriesId { get; set; }
     public string Title { get; set; } = string.Empty;
     public int Year { get; set; }
     public string? Network { get; set; }
@@ -266,4 +389,6 @@ public class MissingEpisode
     public DateTime? AirDateUtc { get; set; }
     public string? Overview { get; set; }
     public string? FinaleType { get; set; }
+    public string? JellyfinEpisodeId { get; set; }
+    public string? ThumbnailUrl { get; set; }
 }

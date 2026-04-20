@@ -53,4 +53,5 @@ public class SonarrEpisode
     [JsonPropertyName("monitored")] public bool Monitored { get; set; }
     [JsonPropertyName("absoluteEpisodeNumber")] public int? AbsoluteEpisodeNumber { get; set; }
     [JsonPropertyName("finaleType")] public string? FinaleType { get; set; }
+    [JsonPropertyName("images")] public List<SonarrImage>? Images { get; set; }
 }
