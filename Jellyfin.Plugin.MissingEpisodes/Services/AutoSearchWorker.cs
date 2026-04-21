@@ -42,7 +42,7 @@ public class AutoSearchWorker : BackgroundService
                     if (due)
                     {
                         _logger.LogInformation("MissingEpisodes: auto-search pass starting.");
-                        var result = await _service.ScanAsync(stoppingToken).ConfigureAwait(false);
+                        var result = await _service.ScanAsync(null, stoppingToken).ConfigureAwait(false);
                         var ids = result.Series.SelectMany(s => s.Missing.Select(m => m.Id)).ToList();
                         if (ids.Count > 0)
                         {

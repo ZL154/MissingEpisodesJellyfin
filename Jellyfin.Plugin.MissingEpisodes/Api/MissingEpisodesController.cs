@@ -37,13 +37,15 @@ public class MissingEpisodesController : ControllerBase
         return Ok(new { ok, error });
     }
 
+    public record ScanRequest(string? Source);
+
     [HttpPost("scan")]
     [ProducesResponseType(typeof(ScanResult), StatusCodes.Status200OK)]
-    public async Task<ActionResult> Scan(CancellationToken ct)
+    public async Task<ActionResult> Scan([FromBody] ScanRequest? req, CancellationToken ct)
     {
         try
         {
-            var result = await _service.ScanAsync(ct).ConfigureAwait(false);
+            var result = await _service.ScanAsync(req?.Source, ct).ConfigureAwait(false);
             return Ok(result);
         }
         catch (System.InvalidOperationException ex)
@@ -59,6 +61,10 @@ public class MissingEpisodesController : ControllerBase
             return StatusCode(500, new { error = ex.Message });
         }
     }
+
+    [HttpGet("progress")]
+    [ProducesResponseType(typeof(ScanProgress), StatusCodes.Status200OK)]
+    public ActionResult GetProgress() => Ok(_service.Progress);
 
     [HttpGet("last")]
     [ProducesResponseType(typeof(ScanResult), StatusCodes.Status200OK)]

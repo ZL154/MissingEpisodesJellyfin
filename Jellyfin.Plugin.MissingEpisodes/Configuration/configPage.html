@@ -270,6 +270,22 @@
   display: flex; gap: .5rem; align-items: center; }
 .me-note svg { width: 15px; height: 15px; color: var(--accent); flex: 0 0 auto; }
 
+.me-scan-strip { display: none; margin-bottom: 1.2rem; padding: .85rem 1rem;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 9px; }
+.me-scan-strip.show { display: block; }
+.me-scan-strip .top { display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem; margin-bottom: .55rem; font-size: .85rem; }
+.me-scan-strip .top .lbl { color: var(--dim); font-weight: 500; }
+.me-scan-strip .top .lbl strong { color: var(--text); font-weight: 600; }
+.me-scan-strip .top .cur { color: var(--text); font-weight: 500; max-width: 55%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+.me-scan-bar { height: 6px; border-radius: 100px; background: var(--panel-2); overflow: hidden; }
+.me-scan-bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent) 0%, #7ed0b3 100%);
+  border-radius: inherit; transition: width .35s ease; width: 0%; }
+.me-scan-bar-fill.indeterminate { width: 40% !important;
+  animation: me-indeterm 1.2s ease-in-out infinite alternate; }
+@keyframes me-indeterm { from { margin-left: -10%; } to { margin-left: 70%; } }
+
 @media (max-width: 720px) {
   .me-hero { padding: 1.1rem 1.15rem; }
   .me-title h1 { font-size: 1.2rem; }
@@ -348,6 +364,14 @@
           <span id="meCfgStatus" class="me-cfg-status"></span>
         </div>
       </div>
+    </div>
+
+    <div class="me-scan-strip" id="meScanStrip">
+      <div class="top">
+        <div class="lbl">Scanning <strong id="meScanSource">—</strong> · <span id="meScanCount">0 / —</span></div>
+        <div class="cur" id="meScanCur">Preparing…</div>
+      </div>
+      <div class="me-scan-bar"><div class="me-scan-bar-fill indeterminate" id="meScanFill"></div></div>
     </div>
 
     <div id="meSourceNote" class="me-note" style="display:none;">
@@ -599,7 +623,8 @@
     }
 
     function scan() {
-        var src = (state.cfg && state.cfg.ScanSource) || 'sonarr';
+        // Use whichever source is currently selected in the UI — the server will persist it.
+        var src = getSeg('#meSourceSeg') || (state.cfg && state.cfg.ScanSource) || 'sonarr';
         var sonarrReady = !!(state.cfg && state.cfg.SonarrUrl && state.cfg.SonarrApiKey);
         if (src !== 'jellyfin' && !sonarrReady) {
             toast('Sonarr source needs URL + API key. Switch to Jellyfin or fill these in.', 'err');
@@ -611,8 +636,15 @@
         btn.disabled = true;
         btn.innerHTML = '<span class="me-spinner"></span> Scanning';
         $('#meEmpty').style.display = 'none';
+        showScanStrip(true, src);
         showSkeleton(true);
-        return request('Plugins/MissingEpisodes/scan', { type: 'POST', data: '{}' })
+
+        var pollId = startProgressPoll();
+
+        return request('Plugins/MissingEpisodes/scan', {
+            type: 'POST',
+            data: JSON.stringify({ source: src })
+        })
             .then(function (r) {
                 state.result = r;
                 render();
@@ -620,10 +652,44 @@
             })
             .catch(function (e) { toast(parseError(e), 'err'); render(); })
             .finally(function () {
+                clearInterval(pollId);
+                showScanStrip(false);
                 btn.disabled = false;
                 btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg> Scan now';
                 showSkeleton(false);
             });
+    }
+
+    function showScanStrip(on, src) {
+        var strip = $('#meScanStrip');
+        if (on) {
+            strip.classList.add('show');
+            $('#meScanSource').textContent = src === 'jellyfin' ? 'Jellyfin' : 'Sonarr';
+            $('#meScanCount').textContent = '0 / —';
+            $('#meScanCur').textContent = 'Preparing…';
+            $('#meScanFill').classList.add('indeterminate');
+            $('#meScanFill').style.width = '';
+        } else {
+            strip.classList.remove('show');
+        }
+    }
+
+    function startProgressPoll() {
+        return setInterval(function () {
+            request('Plugins/MissingEpisodes/progress').then(function (p) {
+                if (!p || !p.InProgress) return;
+                $('#meScanSource').textContent = p.Source === 'jellyfin' ? 'Jellyfin' : 'Sonarr';
+                var total = p.Total || 0;
+                var cur = p.Current || 0;
+                $('#meScanCount').textContent = cur + ' / ' + (total || '—');
+                $('#meScanCur').textContent = p.CurrentTitle || 'Preparing…';
+                var fill = $('#meScanFill');
+                if (total > 0) {
+                    fill.classList.remove('indeterminate');
+                    fill.style.width = Math.min(100, Math.round(100 * cur / total)) + '%';
+                }
+            }).catch(function () { /* silent */ });
+        }, 600);
     }
 
     function showSkeleton(on) {
@@ -910,10 +976,16 @@
     $('#meScanBtn').addEventListener('click', scan);
     $('#meEmptyCta').addEventListener('click', function () { openCfg(true); });
     $('#meSourceSeg').addEventListener('click', function (e) {
-        if (e.target.tagName === 'BUTTON') {
-            var v = e.target.getAttribute('data-v');
-            setSeg('#meSourceSeg', v);
-            updateSourceNote(v);
+        if (e.target.tagName !== 'BUTTON') return;
+        var v = e.target.getAttribute('data-v');
+        setSeg('#meSourceSeg', v);
+        updateSourceNote(v);
+        // Auto-save so a scan right after a segment click uses the picked source.
+        if (state.cfg && state.cfg.ScanSource !== v) {
+            state.cfg.ScanSource = v;
+            ApiClient.updatePluginConfiguration(PLUGIN_ID, state.cfg).then(function () {
+                toast('Source: ' + (v === 'jellyfin' ? 'Jellyfin' : 'Sonarr'), 'ok');
+            }).catch(function () { /* non-fatal — scan endpoint also persists override */ });
         }
     });
     $('#meSortSeg').addEventListener('click', function (e) {

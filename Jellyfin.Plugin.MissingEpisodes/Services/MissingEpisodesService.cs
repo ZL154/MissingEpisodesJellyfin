@@ -22,6 +22,7 @@ public class MissingEpisodesService
 
     private readonly SemaphoreSlim _scanLock = new(1, 1);
     private ScanResult? _lastResult;
+    public ScanProgress Progress { get; } = new();
 
     public MissingEpisodesService(SonarrClient sonarr, ILibraryManager libraryManager, ILogger<MissingEpisodesService> logger)
     {
@@ -35,10 +36,22 @@ public class MissingEpisodesService
     public static bool IsSonarrConfigured(PluginConfiguration cfg)
         => !string.IsNullOrWhiteSpace(cfg.SonarrUrl) && !string.IsNullOrWhiteSpace(cfg.SonarrApiKey);
 
-    public async Task<ScanResult> ScanAsync(CancellationToken ct = default)
+    public async Task<ScanResult> ScanAsync(string? sourceOverride = null, CancellationToken ct = default)
     {
         var cfg = Plugin.Instance?.Configuration
             ?? throw new InvalidOperationException("Plugin not initialized.");
+
+        // Allow the caller (UI) to pass the currently-selected source so an unsaved
+        // segment click still wins. Persist it so later reads stay consistent.
+        if (!string.IsNullOrWhiteSpace(sourceOverride))
+        {
+            var norm = sourceOverride.Equals("jellyfin", StringComparison.OrdinalIgnoreCase) ? "jellyfin" : "sonarr";
+            if (cfg.ScanSource != norm)
+            {
+                cfg.ScanSource = norm;
+                Plugin.Instance?.SaveConfiguration();
+            }
+        }
 
         var useJellyfin = string.Equals(cfg.ScanSource, "jellyfin", StringComparison.OrdinalIgnoreCase);
         var sonarrReady = IsSonarrConfigured(cfg);
@@ -50,6 +63,7 @@ public class MissingEpisodesService
         }
 
         await _scanLock.WaitAsync(ct).ConfigureAwait(false);
+        Progress.Reset(useJellyfin ? "jellyfin" : "sonarr");
         try
         {
             ScanResult result;
@@ -77,6 +91,7 @@ public class MissingEpisodesService
         }
         finally
         {
+            Progress.Finish();
             _scanLock.Release();
         }
     }
@@ -86,6 +101,7 @@ public class MissingEpisodesService
         var ignored = new HashSet<int>(cfg.IgnoredSeriesTvdbIds);
         var allSeries = await _sonarr.GetSeriesAsync(cfg.SonarrUrl, cfg.SonarrApiKey, ct).ConfigureAwait(false);
         var now = DateTime.UtcNow;
+        Progress.SetTotal(allSeries.Count);
 
         var jellyfinByTvdb = BuildJellyfinIndex();
 
@@ -98,6 +114,7 @@ public class MissingEpisodesService
 
         foreach (var s in allSeries)
         {
+            Progress.Advance(s.Title);
             if (ignored.Contains(s.TvdbId)) continue;
             if (cfg.OnlyMonitored && !s.Monitored) continue;
 
@@ -192,10 +209,12 @@ public class MissingEpisodesService
             IncludeItemTypes = new[] { BaseItemKind.Series },
             Recursive = true
         });
+        Progress.SetTotal(seriesItems.Count);
 
         foreach (var item in seriesItems)
         {
-            if (item is not Series series) continue;
+            if (item is not Series series) { Progress.Advance(null); continue; }
+            Progress.Advance(series.Name);
 
             var tvdbStr = series.GetProviderId(MetadataProvider.Tvdb);
             int.TryParse(tvdbStr, out var tvdbId);
@@ -480,4 +499,38 @@ internal class SeasonCount
 {
     public int Total { get; set; }
     public int Have { get; set; }
+}
+
+public class ScanProgress
+{
+    public bool InProgress { get; set; }
+    public int Current { get; set; }
+    public int Total { get; set; }
+    public string? CurrentTitle { get; set; }
+    public string? Source { get; set; }
+    public long StartedAtMs { get; set; }
+
+    public void Reset(string source)
+    {
+        InProgress = true;
+        Current = 0;
+        Total = 0;
+        CurrentTitle = null;
+        Source = source;
+        StartedAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    }
+
+    public void SetTotal(int total) { Total = total; }
+
+    public void Advance(string? title)
+    {
+        Current += 1;
+        CurrentTitle = title;
+    }
+
+    public void Finish()
+    {
+        InProgress = false;
+        CurrentTitle = null;
+    }
 }
