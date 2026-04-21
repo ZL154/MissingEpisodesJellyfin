@@ -340,6 +340,15 @@
 
 <div class="me">
 
+  <!-- Progress strip lives at the top of both views so rescans show it in detail too. -->
+  <div class="me-scan-strip" id="meScanStrip">
+    <div class="top">
+      <div class="lbl">Scanning <strong id="meScanSource">—</strong> · <span id="meScanCount">0 / —</span></div>
+      <div class="cur" id="meScanCur">Preparing…</div>
+    </div>
+    <div class="me-scan-bar"><div class="me-scan-bar-fill indeterminate" id="meScanFill"></div></div>
+  </div>
+
   <!-- ========== LIST VIEW ========== -->
   <div id="meList" class="me-list">
 
@@ -416,14 +425,6 @@
           <span id="meCfgStatus" class="me-cfg-status"></span>
         </div>
       </div>
-    </div>
-
-    <div class="me-scan-strip" id="meScanStrip">
-      <div class="top">
-        <div class="lbl">Scanning <strong id="meScanSource">—</strong> · <span id="meScanCount">0 / —</span></div>
-        <div class="cur" id="meScanCur">Preparing…</div>
-      </div>
-      <div class="me-scan-bar"><div class="me-scan-bar-fill indeterminate" id="meScanFill"></div></div>
     </div>
 
     <div id="meSourceNote" class="me-note" style="display:none;">
@@ -527,6 +528,10 @@
             Rescan this show
           </button>
           <button type="button" class="me-btn danger" id="meDetailIgnore">Ignore this show</button>
+          <button type="button" class="me-btn" id="meDetailUnignore" style="display:none;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+            Remove from ignore list
+          </button>
         </div>
       </div>
     </div>
@@ -985,20 +990,21 @@
         g.querySelectorAll('.me-show').forEach(function (el) {
             el.addEventListener('click', function () {
                 var s = state.filtered[parseInt(el.getAttribute('data-i'), 10)];
-                if (ignoredMode) { unignoreShow(s); }
-                else { openDetail(s); }
+                openDetail(s);
             });
         });
     }
 
-    function unignoreShow(s) {
+    // Called from the detail view's Unignore button.
+    function unignoreCurrent() {
+        var s = state.current;
         if (!s || !s.TvdbId) return;
-        if (!confirm('Remove "' + s.Title + '" from the ignore list? It\'ll be scanned again next time.')) return;
         request('Plugins/MissingEpisodes/series/' + s.TvdbId + '/unignore', {
             type: 'POST', dataType: 'text', data: ''
         }).then(function () {
-            toast('Unignored · ' + s.Title, 'ok');
+            toast('Removed from ignore list · ' + s.Title, 'ok');
             state.result.IgnoredSeries = (state.result.IgnoredSeries || []).filter(function (x) { return x.TvdbId !== s.TvdbId; });
+            closeDetail();
             applyFilters();
         }).catch(function (e) { toast(parseError(e), 'err'); });
     }
@@ -1006,6 +1012,16 @@
     // ---------- DETAIL VIEW ----------
     function openDetail(s) {
         state.current = s;
+        // Is this show in the ignored list? If yes, hide missing-episode actions
+        // and expose a 'Remove from ignore list' button instead.
+        var ignoredList = (state.result && state.result.IgnoredSeries) || [];
+        var isIgnored = !!ignoredList.find(function (x) { return x.TvdbId === s.TvdbId; });
+        state.currentIsIgnored = isIgnored;
+        $('#meDetailSearchAll').style.display = isIgnored ? 'none' : '';
+        $('#meDetailRescan').style.display = isIgnored ? 'none' : '';
+        $('#meDetailIgnore').style.display = isIgnored ? 'none' : '';
+        $('#meDetailUnignore').style.display = isIgnored ? 'inline-flex' : 'none';
+
         $('#meList').style.display = 'none';
         $('#meDetail').classList.add('open');
         window.scrollTo({ top: 0, behavior: 'instant' });
@@ -1040,9 +1056,18 @@
         searchAllBtn.disabled = !searchable;
         searchAllBtn.title = searchable ? '' : 'Configure Sonarr to enable searching';
 
+        if (isIgnored) {
+            $('#meDetailSeasons').innerHTML = '<div class="me-empty" style="margin-top:1rem;">'
+                + '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="m9 9 6 6M15 9l-6 6"/></svg>'
+                + '<h3>On the ignore list</h3>'
+                + '<p>This show is skipped during scans. Click <strong>Remove from ignore list</strong> to start scanning it again.</p>'
+                + '</div>';
+            return;
+        }
+
         // Group by season, merge with Seasons summary for have/total counts
         var bySeason = {};
-        s.Missing.forEach(function (ep) {
+        (s.Missing || []).forEach(function (ep) {
             (bySeason[ep.SeasonNumber] = bySeason[ep.SeasonNumber] || []).push(ep);
         });
         var summary = {};
@@ -1310,6 +1335,7 @@
             .catch(function (err) { toast(parseError(err), 'err'); });
     });
 
+    $('#meDetailUnignore').addEventListener('click', unignoreCurrent);
     $('#meDetailRescan').addEventListener('click', function () {
         if (!state.current) return;
         var id = state.current.TvdbId;

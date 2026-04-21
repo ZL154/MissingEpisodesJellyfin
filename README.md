@@ -4,7 +4,7 @@ A Jellyfin plugin that finds the gaps in your TV library and — if you want —
 
 Scans your **Jellyfin library**, your **Sonarr instance**, or looks things up on **TMDB** when neither has the data. Shows you exactly what's missing per show, per season, per episode, with thumbnails, air dates, storage sizes, and a one-click search button that hands off to Sonarr.
 
-> **Status: pre-release (0.2.0).** Works end-to-end on Jellyfin 10.11.8 + Sonarr v3. Install is manual or via manifest URL — see below. Please open issues at <https://github.com/ZL154/MissingEpisodesJellyfin/issues>.
+> **Status: stable (1.0.x).** Works end-to-end on Jellyfin 10.11.8 + Sonarr v3. Install via manifest URL or manual DLL drop — see below. Issues & PRs at <https://github.com/ZL154/MissingEpisodesJellyfin>.
 
 ## Features
 
@@ -20,7 +20,10 @@ Scans your **Jellyfin library**, your **Sonarr instance**, or looks things up on
 - **Persistent results + scan history** — the last scan survives Jellyfin restarts; a rolling log of the most recent 25 scans is kept for context (timestamp, source, missing count, duration).
 - **Live progress** — the scan runs server-side and shows live progress (X / Y series, current show, percentage). Leave the page, come back, and the UI picks up where it left off. A toast fires in the Jellyfin web client when the scan finishes.
 - **Sidebar entry** — shows up as *Missing Episodes* in the Jellyfin admin sidebar, not buried in the Plugins page.
-- **Storage + path info** — each show card shows a GB chip (size on disk), and the detail view shows the series path.
+- **Storage + path info** — each show card shows a GB chip (size on disk); the detail view shows the series path. Size is summed from Jellyfin's on-disk folder in Jellyfin modes, or from Sonarr's statistics in Sonarr mode. When both are available, the plugin prefers whichever one actually has content (so a stale Jellyfin path after a move doesn't win).
+- **Rescan this show** — button in the detail view that pulls only the current show (not the whole library). Uses Sonarr's tvdbId-indexed endpoint in Sonarr mode; runs just the single-series Jellyfin loop in Jellyfin mode.
+- **Sort by Size / Progress** — alongside the default Most missing / Title / Recent. "Progress" surfaces your least-complete shows first.
+- **Scan history with a Clear button** — rolling 25 scans log. Wipe it anytime.
 - **Admin-only API** — every endpoint requires the `RequiresElevation` policy.
 
 ## Screenshots
@@ -149,6 +152,12 @@ Sizes only populate when Sonarr has the show. In Jellyfin-only modes the plugin 
 
 **Settings don't seem to save.**
 The Jellyfin/Sonarr/TMDB segment controls auto-save on click. Scan source also auto-saves. The free-form fields (URL, API key, interval, checkboxes) need **Save**. Reload the page to verify.
+
+**"An error occurred while getting the plugin details from the repository." on the Plugins page.**
+Harmless. This happens when the plugin was installed manually (DLL dropped into the plugins folder) — Jellyfin can't look it up in any of your configured plugin repositories, so it shows this warning on the details view. The plugin itself runs fine. To silence it, add the manifest URL (`https://raw.githubusercontent.com/ZL154/MissingEpisodesJellyfin/main/manifest.json`) in **Dashboard → Plugins → Repositories**, then uninstall the plugin and reinstall it from the catalog.
+
+**Rescan finished but the missing count didn't change.**
+Rescan re-reads the show's data from Sonarr or TMDB — it doesn't wait for Sonarr to actually download anything. If you just kicked off the Search and immediately rescanned, the count won't drop until Sonarr grabs a release and Jellyfin picks it up. Give Sonarr a minute, then rescan again.
 
 ## License
 
