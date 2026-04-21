@@ -345,6 +345,14 @@
               <button type="button" data-v="jellyfin">Jellyfin</button>
             </div>
           </div>
+          <div class="me-field" id="meJfModeField" style="display:none;">
+            <label>Jellyfin method</label>
+            <div class="me-segment" id="meJfModeSeg">
+              <button type="button" data-v="virtual" class="active">Virtual items</button>
+              <button type="button" data-v="tmdb">TMDB</button>
+              <button type="button" data-v="gap">Gap detection</button>
+            </div>
+          </div>
           <div class="me-field">
             <label for="meInterval">Auto-search every (hours)</label>
             <input type="number" id="meInterval" min="1" max="720" step="1" value="24" />
@@ -562,12 +570,28 @@
             $('#meIgnoreUnaired').checked = cfg.IgnoreUnaired !== false;
             var src = cfg.ScanSource || 'sonarr';
             setSeg('#meSourceSeg', src);
-            updateSourceNote(src);
+            var jfMode = (cfg.JellyfinScanMode || 'virtual').toLowerCase();
+            if (jfMode !== 'virtual' && jfMode !== 'tmdb' && jfMode !== 'gap') jfMode = 'virtual';
+            setSeg('#meJfModeSeg', jfMode);
+            $('#meJfModeField').style.display = src === 'jellyfin' ? 'flex' : 'none';
+            updateSourceNote(src, jfMode);
         });
     }
 
-    function updateSourceNote(src) {
-        $('#meSourceNote').style.display = src === 'jellyfin' ? 'flex' : 'none';
+    function updateSourceNote(src, jfMode) {
+        var note = $('#meSourceNote');
+        if (src !== 'jellyfin') { note.style.display = 'none'; return; }
+        jfMode = (jfMode || getSeg('#meJfModeSeg') || 'virtual').toLowerCase();
+        var msg;
+        if (jfMode === 'virtual') {
+            msg = '<strong>Virtual items</strong>: uses Jellyfin\'s own missing-episode items. Enable <strong>Display missing episodes within seasons</strong> in Jellyfin &rarr; Libraries, then run a library scan so Jellyfin creates them.';
+        } else if (jfMode === 'tmdb') {
+            msg = '<strong>TMDB</strong>: queries themoviedb.org for each show\'s episode list. Needs a TMDB API key set above. Works without any Jellyfin library changes.';
+        } else {
+            msg = '<strong>Gap detection</strong>: finds numbering holes (E01, E02, <em>E03 missing</em>, E04) in what\'s on disk. Can\'t detect missing seasons or trailing episodes.';
+        }
+        note.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg><span>' + msg + '</span>';
+        note.style.display = 'flex';
     }
 
     function setSeg(sel, v) {
@@ -585,6 +609,7 @@
         state.cfg.SonarrApiKey = $('#meSonarrKey').value.trim();
         state.cfg.TmdbApiKey = $('#meTmdbKey').value.trim();
         state.cfg.ScanSource = getSeg('#meSourceSeg') || 'sonarr';
+        state.cfg.JellyfinScanMode = getSeg('#meJfModeSeg') || 'virtual';
         state.cfg.AutoSearchEnabled = $('#meAutoSearch').checked;
         state.cfg.OnlyMonitored = $('#meOnlyMonitored').checked;
         state.cfg.IgnoreSpecials = $('#meIgnoreSpecials').checked;
@@ -998,13 +1023,26 @@
         if (e.target.tagName !== 'BUTTON') return;
         var v = e.target.getAttribute('data-v');
         setSeg('#meSourceSeg', v);
+        $('#meJfModeField').style.display = v === 'jellyfin' ? 'flex' : 'none';
         updateSourceNote(v);
-        // Auto-save so a scan right after a segment click uses the picked source.
         if (state.cfg && state.cfg.ScanSource !== v) {
             state.cfg.ScanSource = v;
             ApiClient.updatePluginConfiguration(PLUGIN_ID, state.cfg).then(function () {
                 toast('Source: ' + (v === 'jellyfin' ? 'Jellyfin' : 'Sonarr'), 'ok');
-            }).catch(function () { /* non-fatal — scan endpoint also persists override */ });
+            }).catch(function () {});
+        }
+    });
+    $('#meJfModeSeg').addEventListener('click', function (e) {
+        if (e.target.tagName !== 'BUTTON') return;
+        var v = e.target.getAttribute('data-v');
+        setSeg('#meJfModeSeg', v);
+        updateSourceNote('jellyfin', v);
+        if (state.cfg && state.cfg.JellyfinScanMode !== v) {
+            state.cfg.JellyfinScanMode = v;
+            ApiClient.updatePluginConfiguration(PLUGIN_ID, state.cfg).then(function () {
+                var label = v === 'virtual' ? 'Virtual items' : (v === 'tmdb' ? 'TMDB' : 'Gap detection');
+                toast('Method: ' + label, 'ok');
+            }).catch(function () {});
         }
     });
     $('#meSortSeg').addEventListener('click', function (e) {

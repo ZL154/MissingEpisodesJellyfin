@@ -10,8 +10,14 @@ public class PluginConfiguration : BasePluginConfiguration
     public string SonarrApiKey { get; set; } = string.Empty;
 
     // "sonarr" — trust Sonarr's monitored/hasFile flags as the source of truth
-    // "jellyfin" — diff Sonarr's expected episodes against what's actually present in the Jellyfin library
+    // "jellyfin" — use Jellyfin library data, method picked by JellyfinScanMode
     public string ScanSource { get; set; } = "sonarr";
+
+    // When ScanSource == "jellyfin", which method defines "what should exist":
+    //   "virtual" — Jellyfin's virtual episode items (needs library "Display missing" setting)
+    //   "tmdb"    — query TMDB for the canonical episode list (needs TmdbApiKey)
+    //   "gap"     — infer gaps from existing episode numbering (no external deps)
+    public string JellyfinScanMode { get; set; } = "virtual";
 
     public bool IgnoreSpecials { get; set; } = true;
 

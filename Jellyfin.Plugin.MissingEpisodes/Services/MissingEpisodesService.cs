@@ -199,6 +199,13 @@ public class MissingEpisodesService
 
     private async Task<ScanResult> ScanJellyfinOnlyAsync(PluginConfiguration cfg, CancellationToken ct)
     {
+        var mode = (cfg.JellyfinScanMode ?? "virtual").ToLowerInvariant();
+        if (mode != "virtual" && mode != "tmdb" && mode != "gap") mode = "virtual";
+        if (mode == "tmdb" && string.IsNullOrWhiteSpace(cfg.TmdbApiKey))
+        {
+            throw new InvalidOperationException("TMDB mode requires a TMDB API key in settings.");
+        }
+
         var now = DateTime.UtcNow;
         var result = new ScanResult
         {
@@ -235,11 +242,9 @@ public class MissingEpisodesService
             var seasonStats = new Dictionary<int, SeasonCount>();
             var missing = new List<MissingEpisode>();
 
-            // Real (on-disk) episode numbers per season — used both for Have counts
-            // and for gap-detection fallback when the library hasn't created virtual
-            // items for missing episodes.
+            // Real (on-disk) episode numbers per season — used for Have counts
+            // and for gap-detection / TMDB diffing.
             var realBySeason = new Dictionary<int, HashSet<int>>();
-            var virtualExisted = false;
 
             foreach (var e in allEps)
             {
@@ -275,7 +280,9 @@ public class MissingEpisodesService
                     continue;
                 }
 
-                virtualExisted = true;
+                // Only keep virtual items if the user picked that mode.
+                if (mode != "virtual") continue;
+
                 var jfEpId = episode.Id.ToString("N");
                 missing.Add(new MissingEpisode
                 {
@@ -290,18 +297,16 @@ public class MissingEpisodesService
                 });
             }
 
-            // No virtual items → try TMDB (if key + tmdb id available), else gap-detect.
-            if (!virtualExisted)
+            // If mode is TMDB, fetch per-series from TMDB (only needs a TMDB id).
+            if (mode == "tmdb")
             {
                 var tmdbStr = series.GetProviderId(MetadataProvider.Tmdb);
                 int.TryParse(tmdbStr, out var tmdbId);
-                var tmdbWorked = false;
-
-                if (!string.IsNullOrWhiteSpace(cfg.TmdbApiKey) && tmdbId > 0)
+                if (tmdbId > 0)
                 {
                     try
                     {
-                        tmdbWorked = await FillMissingFromTmdbAsync(
+                        await FillMissingFromTmdbAsync(
                             cfg, tmdbId, realBySeason, missing, seasonStats, now, ct).ConfigureAwait(false);
                     }
                     catch (Exception ex)
@@ -309,34 +314,34 @@ public class MissingEpisodesService
                         _logger.LogWarning(ex, "TMDB fetch failed for {Title} ({Tmdb})", series.Name, tmdbId);
                     }
                 }
+            }
 
-                if (!tmdbWorked)
+            // Gap mode: infer missing eps purely from on-disk numbering holes.
+            if (mode == "gap")
+            {
+                foreach (var kv in realBySeason)
                 {
-                    // Gap detection: E01, E02, _, E04 → flag E03. Can't detect trailing episodes.
-                    foreach (var kv in realBySeason)
+                    var sn = kv.Key;
+                    var present = kv.Value;
+                    if (present.Count == 0) continue;
+                    var max = present.Max();
+                    for (var n = 1; n <= max; n++)
                     {
-                        var sn = kv.Key;
-                        var present = kv.Value;
-                        if (present.Count == 0) continue;
-                        var max = present.Max();
-                        for (var n = 1; n <= max; n++)
-                        {
-                            if (present.Contains(n)) continue;
-                            if (!seasonStats.TryGetValue(sn, out var stats2)) stats2 = new SeasonCount();
-                            stats2.Total += 1;
-                            seasonStats[sn] = stats2;
+                        if (present.Contains(n)) continue;
+                        if (!seasonStats.TryGetValue(sn, out var stats2)) stats2 = new SeasonCount();
+                        stats2.Total += 1;
+                        seasonStats[sn] = stats2;
 
-                            missing.Add(new MissingEpisode
-                            {
-                                Id = 0,
-                                SeasonNumber = sn,
-                                EpisodeNumber = n,
-                                Title = null,
-                                Overview = "Inferred from episode-number gap. Add a TMDB API key or enable 'Display missing episodes within seasons' for full episode details.",
-                                JellyfinEpisodeId = null,
-                                ThumbnailUrl = "jellyfin:" + series.Id.ToString("N")
-                            });
-                        }
+                        missing.Add(new MissingEpisode
+                        {
+                            Id = 0,
+                            SeasonNumber = sn,
+                            EpisodeNumber = n,
+                            Title = null,
+                            Overview = "Inferred from numbering gap in the Jellyfin library.",
+                            JellyfinEpisodeId = null,
+                            ThumbnailUrl = "jellyfin:" + series.Id.ToString("N")
+                        });
                     }
                 }
             }
