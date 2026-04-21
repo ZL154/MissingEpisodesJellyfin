@@ -430,27 +430,25 @@ public class MissingEpisodesService
         return result;
     }
 
-    private async Task<bool> FillMissingFromTmdbAsync(
+    // Populate the expected set from TMDB. Adds missing-episode entries for TMDB
+    // episodes that aren't on disk. Does NOT mutate seasonStats — that's computed
+    // by the caller once from the final present/expected union.
+    private async Task<bool> FillFromTmdbAsync(
         PluginConfiguration cfg,
         int tmdbId,
-        Dictionary<int, HashSet<int>> realBySeason,
+        Dictionary<int, HashSet<int>> presentBySeason,
+        Dictionary<int, HashSet<int>> expectedBySeason,
         List<MissingEpisode> missing,
-        Dictionary<int, SeasonCount> seasonStats,
         DateTime now,
         CancellationToken ct)
     {
         var detail = await _tmdb.GetSeriesAsync(cfg.TmdbApiKey, tmdbId, ct).ConfigureAwait(false);
         if (detail?.Seasons == null || detail.Seasons.Count == 0) return false;
 
-        // Union of seasons TMDB knows about and seasons Jellyfin has real files for.
-        var allSeasons = new HashSet<int>();
-        foreach (var s in detail.Seasons) allSeasons.Add(s.SeasonNumber);
-        foreach (var s in realBySeason.Keys) allSeasons.Add(s);
+        var tmdbSeasons = detail.Seasons.Select(x => x.SeasonNumber).Where(sn => !(cfg.IgnoreSpecials && sn == 0));
 
-        foreach (var sn in allSeasons)
+        foreach (var sn in tmdbSeasons)
         {
-            if (cfg.IgnoreSpecials && sn == 0) continue;
-
             TmdbSeasonDetail? season;
             try
             {
@@ -462,8 +460,14 @@ public class MissingEpisodesService
             }
             if (season?.Episodes == null) continue;
 
-            realBySeason.TryGetValue(sn, out var realSet);
-            realSet ??= new HashSet<int>();
+            presentBySeason.TryGetValue(sn, out var presentSet);
+            presentSet ??= new HashSet<int>();
+
+            if (!expectedBySeason.TryGetValue(sn, out var expSet))
+            {
+                expSet = new HashSet<int>();
+                expectedBySeason[sn] = expSet;
+            }
 
             foreach (var ep in season.Episodes)
             {
@@ -477,12 +481,9 @@ public class MissingEpisodesService
                 }
                 if (cfg.IgnoreUnaired && (!air.HasValue || air.Value > now)) continue;
 
-                if (!seasonStats.TryGetValue(sn, out var stats)) stats = new SeasonCount();
-                stats.Total += 1;
-                if (realSet.Contains(ep.EpisodeNumber)) stats.Have += 1;
-                seasonStats[sn] = stats;
+                expSet.Add(ep.EpisodeNumber);
 
-                if (realSet.Contains(ep.EpisodeNumber)) continue;
+                if (presentSet.Contains(ep.EpisodeNumber)) continue;
 
                 var thumb = !string.IsNullOrEmpty(ep.StillPath) ? TmdbClient.ImageBase + ep.StillPath : null;
                 missing.Add(new MissingEpisode
@@ -673,7 +674,21 @@ public class MissingEpisodesService
     }
 
     // Extracted per-series builder for Jellyfin scans. Used by both the full scan and the
-    // per-show refresh. Returns null for ignored series or ones with nothing missing.
+    // per-show refresh.
+    //
+    // Data model:
+    //   - presentBySeason = episodes that actually exist on disk. Built from Jellyfin's
+    //     non-virtual episode items + any episodes parsed from the series folder
+    //     (catches files Jellyfin never imported).
+    //   - expectedBySeason = episodes that SHOULD exist. Built from mode:
+    //       virtual -> Jellyfin's virtual items (+ present, since you have them too)
+    //       tmdb    -> TMDB's episode list (+ present)
+    //       gap     -> {1..max(present)} per season
+    //
+    // Stats = counts of these sets. Have = |present|. Total = |expected ∪ present|.
+    // Missing = entries in expected not in present.
+    //
+    // Returns null for ignored series or ones with nothing missing.
     private async Task<ScanSeries?> ProcessJellyfinSeriesAsync(PluginConfiguration cfg, Series series, string mode, CancellationToken ct)
     {
         var ignoredTvdb = new HashSet<int>(cfg.IgnoredSeriesTvdbIds);
@@ -691,9 +706,9 @@ public class MissingEpisodesService
             Recursive = true
         });
 
-        var seasonStats = new Dictionary<int, SeasonCount>();
-        var missing = new List<MissingEpisode>();
-        var realBySeason = new Dictionary<int, HashSet<int>>();
+        var presentBySeason = new Dictionary<int, HashSet<int>>();
+        var jfExpectedBySeason = new Dictionary<int, HashSet<int>>();
+        var jfVirtualMeta = new Dictionary<(int, int), Episode>();
 
         foreach (var e in allEps)
         {
@@ -703,106 +718,106 @@ public class MissingEpisodesService
             if (!season.HasValue || !num.HasValue) continue;
             if (cfg.IgnoreSpecials && season.Value == 0) continue;
 
-            var isVirtual = episode.IsVirtualItem;
             var air = episode.PremiereDate;
             var unaired = !air.HasValue || air.Value.ToUniversalTime() > now;
             if (cfg.IgnoreUnaired && unaired) continue;
 
-            if (!seasonStats.TryGetValue(season.Value, out var stats)) stats = new SeasonCount();
             var start = num.Value;
             var end = episode.IndexNumberEnd ?? start;
-            for (var n = start; n <= end; n++)
-            {
-                stats.Total += 1;
-                if (!isVirtual) stats.Have += 1;
-            }
-            seasonStats[season.Value] = stats;
 
-            if (!isVirtual)
+            if (!jfExpectedBySeason.TryGetValue(season.Value, out var exp))
             {
-                if (!realBySeason.TryGetValue(season.Value, out var realSet))
+                exp = new HashSet<int>();
+                jfExpectedBySeason[season.Value] = exp;
+            }
+            for (var n = start; n <= end; n++) exp.Add(n);
+
+            if (episode.IsVirtualItem)
+            {
+                for (var n = start; n <= end; n++) jfVirtualMeta[(season.Value, n)] = episode;
+            }
+            else
+            {
+                if (!presentBySeason.TryGetValue(season.Value, out var set))
                 {
-                    realSet = new HashSet<int>();
-                    realBySeason[season.Value] = realSet;
+                    set = new HashSet<int>();
+                    presentBySeason[season.Value] = set;
                 }
-                for (var n = start; n <= end; n++) realSet.Add(n);
-                continue;
+                for (var n = start; n <= end; n++) set.Add(n);
             }
-
-            if (mode != "virtual") continue;
-            var jfEpIdVirt = episode.Id.ToString("N");
-            missing.Add(new MissingEpisode
-            {
-                Id = 0,
-                SeasonNumber = season.Value,
-                EpisodeNumber = num.Value,
-                Title = episode.Name,
-                AirDateUtc = air?.ToUniversalTime(),
-                Overview = episode.Overview,
-                JellyfinEpisodeId = jfEpIdVirt,
-                ThumbnailUrl = "jellyfin:" + jfEpIdVirt
-            });
         }
 
-        // Walk the series folder once for size + filename-parsed episode coords.
-        // Merge filename-parsed episodes into realBySeason — catches episodes that
-        // are on disk but Jellyfin's library never imported or indexed (the exact
-        // class of bug where Have=0/186 despite 144GB sitting right there).
+        // Walk the folder once for size + filename-parsed episodes. This catches the
+        // Office/TMNT case where files exist but Jellyfin's library never imported them.
         var (sizeOnDisk, filenameEps) = ScanSeriesFolder(series.Path);
         foreach (var (s, e) in filenameEps)
         {
             if (cfg.IgnoreSpecials && s == 0) continue;
-            if (!realBySeason.TryGetValue(s, out var realSet))
+            if (!presentBySeason.TryGetValue(s, out var set))
             {
-                realSet = new HashSet<int>();
-                realBySeason[s] = realSet;
+                set = new HashSet<int>();
+                presentBySeason[s] = set;
             }
-            if (!realSet.Add(e)) continue; // Jellyfin already knew about this one as real
-
-            // Was this episode in the missing list (Jellyfin knew it as virtual)?
-            // If so, it's actually present → drop from missing + bump Have only.
-            // Otherwise Jellyfin had no record at all → bump both Total and Have.
-            var idx = missing.FindIndex(m => m.SeasonNumber == s && m.EpisodeNumber == e);
-            if (!seasonStats.TryGetValue(s, out var stat)) stat = new SeasonCount();
-            if (idx >= 0)
-            {
-                missing.RemoveAt(idx);
-                stat.Have += 1;
-            }
-            else
-            {
-                stat.Total += 1;
-                stat.Have += 1;
-            }
-            seasonStats[s] = stat;
+            set.Add(e);
         }
 
-        if (mode == "tmdb" && tmdbIdSeries > 0)
+        // Build the expected set from the selected mode.
+        var expectedBySeason = new Dictionary<int, HashSet<int>>();
+        var missing = new List<MissingEpisode>();
+
+        if (mode == "virtual")
+        {
+            // Expected = whatever Jellyfin knows about (real + virtual).
+            foreach (var kv in jfExpectedBySeason)
+            {
+                expectedBySeason[kv.Key] = new HashSet<int>(kv.Value);
+            }
+            // Missing = virtual items not present.
+            foreach (var kv in jfVirtualMeta)
+            {
+                var (s, n) = kv.Key;
+                if (presentBySeason.TryGetValue(s, out var pres) && pres.Contains(n)) continue;
+                var episode = kv.Value;
+                var jfEpIdVirt = episode.Id.ToString("N");
+                missing.Add(new MissingEpisode
+                {
+                    Id = 0,
+                    SeasonNumber = s,
+                    EpisodeNumber = n,
+                    Title = episode.Name,
+                    AirDateUtc = episode.PremiereDate?.ToUniversalTime(),
+                    Overview = episode.Overview,
+                    JellyfinEpisodeId = jfEpIdVirt,
+                    ThumbnailUrl = "jellyfin:" + jfEpIdVirt
+                });
+            }
+        }
+        else if (mode == "tmdb" && tmdbIdSeries > 0)
         {
             try
             {
-                await FillMissingFromTmdbAsync(cfg, tmdbIdSeries, realBySeason, missing, seasonStats, now, ct).ConfigureAwait(false);
+                await FillFromTmdbAsync(cfg, tmdbIdSeries, presentBySeason, expectedBySeason, missing, now, ct)
+                    .ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "TMDB fetch failed for {Title} ({Tmdb})", series.Name, tmdbIdSeries);
             }
         }
-
-        if (mode == "gap")
+        else if (mode == "gap")
         {
-            foreach (var kv in realBySeason)
+            foreach (var kv in presentBySeason)
             {
                 var sn = kv.Key;
                 var present = kv.Value;
                 if (present.Count == 0) continue;
                 var max = present.Max();
+                var set = new HashSet<int>();
+                for (var n = 1; n <= max; n++) set.Add(n);
+                expectedBySeason[sn] = set;
                 for (var n = 1; n <= max; n++)
                 {
                     if (present.Contains(n)) continue;
-                    if (!seasonStats.TryGetValue(sn, out var stats2)) stats2 = new SeasonCount();
-                    stats2.Total += 1;
-                    seasonStats[sn] = stats2;
                     missing.Add(new MissingEpisode
                     {
                         Id = 0,
@@ -815,6 +830,31 @@ public class MissingEpisodesService
                     });
                 }
             }
+        }
+
+        // Compute final stats from the two sets. Have = files present. Total = files
+        // expected (at minimum as many as are present, since an on-disk file implies
+        // the episode exists).
+        var seasonStats = new Dictionary<int, SeasonCount>();
+        var allSeasons = new HashSet<int>(presentBySeason.Keys);
+        foreach (var k in expectedBySeason.Keys) allSeasons.Add(k);
+        foreach (var sn in allSeasons)
+        {
+            if (cfg.IgnoreSpecials && sn == 0) continue;
+            var have = presentBySeason.TryGetValue(sn, out var p) ? p.Count : 0;
+            var totalExpected = expectedBySeason.TryGetValue(sn, out var ex) ? ex.Count : 0;
+            // Union size — some expected items also count as present; we want expected ∪ present.
+            var unionCount = totalExpected;
+            if (ex != null && p != null)
+            {
+                // Count present items not in expected and add to total.
+                foreach (var n in p) if (!ex.Contains(n)) unionCount += 1;
+            }
+            else
+            {
+                unionCount = Math.Max(totalExpected, have);
+            }
+            seasonStats[sn] = new SeasonCount { Have = have, Total = unionCount };
         }
 
         if (missing.Count == 0) return null;

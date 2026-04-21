@@ -9,6 +9,14 @@
     "imageUrl": null,
     "versions": [
       {
+        "version": "1.0.4.0",
+        "changelog": "Real accuracy fix.\n- Rewrote ProcessJellyfinSeriesAsync around a clean present/expected separation. Filename-parsed episodes now correctly land in the present set without double-counting with TMDB's expected set.\n- Previously: shows like The Office read as 0/186 even though the folder had 144GB of correctly-named S##E## files because filename merge was running AFTER partial stat accumulation and TMDB mode was then double-counting Total. Now stats are computed once, at the end, from |present| and |expected ∪ present|.\n- Stale last-result.json from prior versions is naturally overwritten on the first 1.0.4 scan.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/ZL154/MissingEpisodesJellyfin/releases/download/v1.0.4/MissingEpisodes_1.0.4.0.zip",
+        "checksum": "8fc1f64ce3116dde9f2cdf0c0798eb62",
+        "timestamp": "2026-04-21T21:30:00Z"
+      },
+      {
         "version": "1.0.3.0",
         "changelog": "Accuracy fix + security hardening.\n- Jellyfin scans now walk the series folder and parse S##E## / 1x05 patterns from filenames. Catches episodes that are on disk but Jellyfin's library never imported (was showing shows with 144 GB of files as 0/186).\n- XSS hardening: image URLs for posters/backdrops/thumbnails now set via JS with JSON.stringify escaping instead of inline style interpolation — can't break out of the url() literal.\n- Large internal refactor: the full Jellyfin scan now delegates per-series to the same helper the rescan-one button uses. No duplicated logic.\n- README rewritten with AchievementBadges-style copy-paste install block and security section.",
         "targetAbi": "10.11.0.0",
