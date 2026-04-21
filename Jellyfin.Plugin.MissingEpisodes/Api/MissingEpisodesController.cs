@@ -95,6 +95,10 @@ public class MissingEpisodesController : ControllerBase
     [ProducesResponseType(typeof(ScanProgress), StatusCodes.Status200OK)]
     public ActionResult GetProgress() => Ok(_service.Progress);
 
+    [HttpGet("history")]
+    [ProducesResponseType(typeof(List<ScanHistoryEntry>), StatusCodes.Status200OK)]
+    public ActionResult GetHistory() => Ok(_service.LoadHistory());
+
     [HttpGet("last")]
     [ProducesResponseType(typeof(ScanResult), StatusCodes.Status200OK)]
     public ActionResult GetLast()

@@ -276,6 +276,33 @@
   display: flex; gap: .5rem; align-items: center; }
 .me-note svg { width: 15px; height: 15px; color: var(--accent); flex: 0 0 auto; }
 
+.me-history { background: var(--panel); border: 1px solid var(--border); border-radius: 9px;
+  padding: .55rem .85rem; margin-bottom: 1.2rem; display: none; }
+.me-history.show { display: block; }
+.me-history-head { display: flex; align-items: center; justify-content: space-between;
+  cursor: pointer; user-select: none; padding: .25rem 0; }
+.me-history-head h4 { margin: 0; font-size: .82rem; font-weight: 600; color: var(--dim);
+  text-transform: uppercase; letter-spacing: 1px; display: flex; align-items: center; gap: .45rem; }
+.me-history-head .chev { width: 14px; height: 14px; color: var(--dim); transition: transform .18s; }
+.me-history.open .me-history-head .chev { transform: rotate(90deg); }
+.me-history-body { display: none; padding-top: .5rem; border-top: 1px solid var(--border);
+  margin-top: .45rem; }
+.me-history.open .me-history-body { display: block; }
+.me-history-row { display: grid; grid-template-columns: auto 1fr auto auto auto;
+  gap: .75rem; align-items: center; padding: .4rem .1rem; font-size: .81rem;
+  border-bottom: 1px solid var(--border); }
+.me-history-row:last-child { border-bottom: 0; }
+.me-history-row .time { color: var(--dim); font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .76rem; min-width: 90px; }
+.me-history-row .src { display: inline-flex; padding: .1rem .5rem; font-size: .7rem;
+  border-radius: 100px; background: var(--panel-2); color: var(--dim); font-weight: 600;
+  letter-spacing: .3px; text-transform: uppercase; }
+.me-history-row .src.jellyfin { background: rgba(107,122,161,0.25); color: #8da4d0; }
+.me-history-row .src.sonarr { background: rgba(77,158,209,0.2); color: var(--accent); }
+.me-history-row .missing { font-weight: 600; color: var(--danger); font-family: ui-monospace, monospace; }
+.me-history-row .shows { color: var(--dim); font-size: .76rem; font-family: ui-monospace, monospace; }
+.me-history-row .dur { color: var(--dim-2); font-size: .72rem; font-family: ui-monospace, monospace; }
+
 .me-scan-strip { display: none; margin-bottom: 1.2rem; padding: .85rem 1rem;
   background: var(--panel); border: 1px solid var(--border); border-radius: 9px; }
 .me-scan-strip.show { display: block; }
@@ -419,6 +446,16 @@
         <span class="k">Last scan</span>
         <span class="spark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
       </div>
+    </div>
+
+    <div class="me-history" id="meHistory">
+      <div class="me-history-head" id="meHistoryHead">
+        <h4>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m9 6 6 6-6 6"/></svg>
+          Scan history <span id="meHistoryCount" style="color:var(--dim-2);font-weight:500;margin-left:.3rem;"></span>
+        </h4>
+      </div>
+      <div class="me-history-body" id="meHistoryBody"></div>
     </div>
 
     <div class="me-filters" id="meFilters" style="display:none;">
@@ -743,6 +780,7 @@
                         toast('Scan complete · ' + state.result.TotalMissing + ' missing', 'ok');
                     }
                 });
+                loadHistory();
             }
         }).catch(function () { /* silent */ });
     }
@@ -793,6 +831,44 @@
             if (r && r.empty) { showEmpty(); return; }
             state.result = r; render();
         }).catch(function () { showEmpty(); });
+    }
+
+    function loadHistory() {
+        return request('Plugins/MissingEpisodes/history').then(function (rows) {
+            renderHistory(rows || []);
+        }).catch(function () { renderHistory([]); });
+    }
+
+    function renderHistory(rows) {
+        var wrap = $('#meHistory');
+        var body = $('#meHistoryBody');
+        var count = $('#meHistoryCount');
+        if (!rows || !rows.length) {
+            wrap.classList.remove('show');
+            body.innerHTML = '';
+            return;
+        }
+        wrap.classList.add('show');
+        count.textContent = '· ' + rows.length;
+        body.innerHTML = rows.slice(0, 10).map(function (h) {
+            var time = formatRelative(h.ScannedAtUtc);
+            var absTime = h.ScannedAtUtc ? new Date(h.ScannedAtUtc).toLocaleString() : '';
+            var srcLabel = h.Source === 'jellyfin' ? 'Jellyfin' : 'Sonarr';
+            if (h.Source === 'jellyfin' && h.JellyfinMode) {
+                var m = h.JellyfinMode === 'virtual' ? 'Virtual' : (h.JellyfinMode === 'tmdb' ? 'TMDB' : 'Gap');
+                srcLabel = 'Jellyfin · ' + m;
+            }
+            var dur = h.DurationMs > 0
+                ? (h.DurationMs < 1000 ? h.DurationMs + 'ms' : (h.DurationMs / 1000).toFixed(1) + 's')
+                : '';
+            return '<div class="me-history-row" title="' + escapeHtml(absTime) + '">'
+                + '<span class="time">' + escapeHtml(time) + '</span>'
+                + '<span class="src ' + (h.Source === 'jellyfin' ? 'jellyfin' : 'sonarr') + '">' + escapeHtml(srcLabel) + '</span>'
+                + '<span class="missing">' + h.TotalMissing + ' missing</span>'
+                + '<span class="shows">' + h.ShowCount + ' show' + (h.ShowCount === 1 ? '' : 's') + '</span>'
+                + '<span class="dur">' + dur + '</span>'
+                + '</div>';
+        }).join('');
     }
 
     function showEmpty() {
@@ -1083,8 +1159,8 @@
     }
 
     // Events
-    page.addEventListener('viewshow', function () { loadConfig().then(loadLast).then(resumeScanIfRunning); });
-    page.addEventListener('pageshow', function () { loadConfig().then(loadLast).then(resumeScanIfRunning); });
+    page.addEventListener('viewshow', function () { loadConfig().then(loadLast).then(loadHistory).then(resumeScanIfRunning); });
+    page.addEventListener('pageshow', function () { loadConfig().then(loadLast).then(loadHistory).then(resumeScanIfRunning); });
 
     $('#meCfgToggle').addEventListener('click', function () { openCfg(); });
     $('#meTestBtn').addEventListener('click', testConnection);
@@ -1178,7 +1254,11 @@
         if (e.key === 'Escape' && $('#meDetail').classList.contains('open')) closeDetail();
     });
 
-    loadConfig().then(loadLast).then(resumeScanIfRunning);
+    $('#meHistoryHead').addEventListener('click', function () {
+        $('#meHistory').classList.toggle('open');
+    });
+
+    loadConfig().then(loadLast).then(loadHistory).then(resumeScanIfRunning);
 })();
 </script>
 

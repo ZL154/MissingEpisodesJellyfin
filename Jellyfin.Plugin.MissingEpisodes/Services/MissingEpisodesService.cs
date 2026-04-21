@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
@@ -27,7 +29,25 @@ public class MissingEpisodesService
 
     private readonly SemaphoreSlim _scanLock = new(1, 1);
     private ScanResult? _lastResult;
+    private bool _diskLoadAttempted;
     public ScanProgress Progress { get; } = new();
+
+    private static readonly JsonSerializerOptions PersistJsonOpts = new()
+    {
+        WriteIndented = false
+    };
+
+    private string? DataDir
+    {
+        get
+        {
+            var inst = Plugin.Instance;
+            if (inst == null) return null;
+            try { return inst.DataFolderPath; } catch { return null; }
+        }
+    }
+    private string? LastResultPath => DataDir == null ? null : Path.Combine(DataDir, "last-result.json");
+    private string? HistoryPath => DataDir == null ? null : Path.Combine(DataDir, "history.json");
 
     public MissingEpisodesService(
         SonarrClient sonarr,
@@ -45,7 +65,84 @@ public class MissingEpisodesService
 
     public TmdbClient Tmdb => _tmdb;
 
-    public ScanResult? LastResult => _lastResult;
+    public ScanResult? LastResult
+    {
+        get
+        {
+            if (!_diskLoadAttempted && _lastResult == null)
+            {
+                _diskLoadAttempted = true;
+                TryLoadLastFromDisk();
+            }
+            return _lastResult;
+        }
+    }
+
+    private void TryLoadLastFromDisk()
+    {
+        try
+        {
+            var path = LastResultPath;
+            if (path == null || !File.Exists(path)) return;
+            var json = File.ReadAllText(path);
+            _lastResult = JsonSerializer.Deserialize<ScanResult>(json);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load last scan result from disk");
+        }
+    }
+
+    private void PersistLast(ScanResult result)
+    {
+        try
+        {
+            var dir = DataDir;
+            var path = LastResultPath;
+            if (dir == null || path == null) return;
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(path, JsonSerializer.Serialize(result, PersistJsonOpts));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to persist last scan result");
+        }
+    }
+
+    public List<ScanHistoryEntry> LoadHistory()
+    {
+        try
+        {
+            var path = HistoryPath;
+            if (path == null || !File.Exists(path)) return new List<ScanHistoryEntry>();
+            var json = File.ReadAllText(path);
+            return JsonSerializer.Deserialize<List<ScanHistoryEntry>>(json) ?? new List<ScanHistoryEntry>();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load scan history");
+            return new List<ScanHistoryEntry>();
+        }
+    }
+
+    private void AppendHistory(ScanHistoryEntry entry)
+    {
+        try
+        {
+            var dir = DataDir;
+            var path = HistoryPath;
+            if (dir == null || path == null) return;
+            Directory.CreateDirectory(dir);
+            var list = LoadHistory();
+            list.Insert(0, entry);
+            if (list.Count > 25) list.RemoveRange(25, list.Count - 25);
+            File.WriteAllText(path, JsonSerializer.Serialize(list, PersistJsonOpts));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to append to scan history");
+        }
+    }
 
     public static bool IsSonarrConfigured(PluginConfiguration cfg)
         => !string.IsNullOrWhiteSpace(cfg.SonarrUrl) && !string.IsNullOrWhiteSpace(cfg.SonarrApiKey);
@@ -99,8 +196,22 @@ public class MissingEpisodesService
 
             result.SonarrConfigured = sonarrReady;
             _lastResult = result;
+            _diskLoadAttempted = true;
             cfg.LastScanIso = result.ScannedAtUtc.ToString("o");
             Plugin.Instance?.SaveConfiguration();
+
+            PersistLast(result);
+            AppendHistory(new ScanHistoryEntry
+            {
+                ScannedAtUtc = result.ScannedAtUtc,
+                Source = result.Source,
+                JellyfinMode = useJellyfin ? (cfg.JellyfinScanMode ?? "virtual") : null,
+                TotalMissing = result.TotalMissing,
+                ShowCount = result.Series.Count,
+                IgnoredCount = result.IgnoredSeries.Count,
+                DurationMs = Math.Max(0, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - Progress.StartedAtMs)
+            });
+
             _ = NotifyAdminsAsync(result);
             return result;
         }
@@ -729,6 +840,17 @@ internal class SeasonCount
 {
     public int Total { get; set; }
     public int Have { get; set; }
+}
+
+public class ScanHistoryEntry
+{
+    public DateTime ScannedAtUtc { get; set; }
+    public string Source { get; set; } = "sonarr";
+    public string? JellyfinMode { get; set; }
+    public int TotalMissing { get; set; }
+    public int ShowCount { get; set; }
+    public int IgnoredCount { get; set; }
+    public long DurationMs { get; set; }
 }
 
 public class ScanProgress
