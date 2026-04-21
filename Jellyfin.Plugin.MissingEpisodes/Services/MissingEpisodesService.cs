@@ -655,6 +655,12 @@ public class MissingEpisodesService
                 if (sonarrS == null) continue;
                 s.SonarrId = sonarrS.Id;
                 if (s.TvdbId <= 0 && sonarrS.TvdbId > 0) s.TvdbId = sonarrS.TvdbId;
+                // Opportunistic data from Sonarr — fill only when missing so we don't clobber
+                // Jellyfin's own values for the user-picked source.
+                if (s.SizeOnDisk == 0 && sonarrS.Statistics?.SizeOnDisk > 0)
+                    s.SizeOnDisk = sonarrS.Statistics.SizeOnDisk;
+                if (string.IsNullOrEmpty(s.Path) && !string.IsNullOrEmpty(sonarrS.Path))
+                    s.Path = sonarrS.Path;
                 // If Sonarr knows the series as anime but Jellyfin didn't tag it, use Sonarr's type.
                 if (s.SeriesType == "standard")
                 {

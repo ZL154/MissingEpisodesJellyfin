@@ -9,7 +9,7 @@
     <RootNamespace>Jellyfin.Plugin.MissingEpisodes</RootNamespace>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <LangVersion>latest</LangVersion>
-    <Version>0.1.11</Version>
+    <Version>0.1.12</Version>
   </PropertyGroup>
 
   <ItemGroup>

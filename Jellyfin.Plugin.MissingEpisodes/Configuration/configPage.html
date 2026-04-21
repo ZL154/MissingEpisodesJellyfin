@@ -227,9 +227,14 @@
   border: 1px solid var(--border); border-radius: 9px; background: var(--panel);
   transition: border-color .14s, background .14s; }
 .me-ep:hover { border-color: var(--border-strong); background: var(--panel-hi); }
-.me-ep.searched { opacity: .55; }
-.me-ep.searched .me-ep-action button { background: rgba(79,178,106,0.14); color: var(--ok);
-  border-color: rgba(79,178,106,0.3); }
+.me-ep.searched { background: rgba(79,178,106,0.06); border-color: rgba(79,178,106,0.35); }
+.me-ep.searched .me-ep-action button { background: rgba(79,178,106,0.18); color: var(--ok);
+  border-color: rgba(79,178,106,0.45); font-weight: 600; }
+.me-ep.searched .me-ep-action button::before { content: "✓ "; font-weight: 700; }
+.me-ep-action button.busy { opacity: .7; pointer-events: none; }
+.me-ep-action button.busy::before { content: ""; display: inline-block; width: .75em; height: .75em;
+  border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%;
+  animation: me-spin .75s linear infinite; margin-right: .35rem; vertical-align: -.1em; }
 
 .me-ep-thumb { flex: 0 0 120px; aspect-ratio: 16/9; border-radius: 6px; overflow: hidden;
   background: var(--panel-2) center/cover no-repeat; position: relative; }
@@ -1126,17 +1131,40 @@
     function searchEpisodes(ids, rowEl) {
         ids = ids.filter(function (x) { return x > 0; });
         if (!ids.length) { toast('No Sonarr episode IDs available', 'err'); return Promise.resolve(); }
+
+        // Immediate feedback: spinner on the button(s) right away.
+        var buttons = [];
+        if (rowEl) {
+            var b = rowEl.querySelector('.me-ep-action button');
+            if (b) { b.classList.add('busy'); b.textContent = 'Searching'; buttons.push(b); }
+        } else if (state.current) {
+            $('#meDetailSeasons').querySelectorAll('.me-ep-action button[data-id]').forEach(function (b) {
+                b.classList.add('busy'); b.textContent = 'Searching'; buttons.push(b);
+            });
+        }
+
         return request('Plugins/MissingEpisodes/search', {
             type: 'POST',
             data: JSON.stringify({ episodeIds: ids })
         }).then(function (r) {
             var n = r.sent || ids.length;
-            toast('Searching ' + n + ' episode' + (n === 1 ? '' : 's'), 'ok');
+            toast('Sent to Sonarr · ' + n + ' episode' + (n === 1 ? '' : 's'), 'ok');
+            buttons.forEach(function (b) {
+                b.classList.remove('busy');
+                b.textContent = 'Queued';
+                b.disabled = true;
+            });
             if (rowEl) rowEl.classList.add('searched');
             else if (state.current) {
                 $('#meDetailSeasons').querySelectorAll('.me-ep').forEach(function (el) { el.classList.add('searched'); });
             }
-        }).catch(function (e) { toast(parseError(e), 'err'); });
+        }).catch(function (e) {
+            toast(parseError(e), 'err');
+            buttons.forEach(function (b) {
+                b.classList.remove('busy');
+                b.textContent = 'Search';
+            });
+        });
     }
 
     function ignoreShow() {
