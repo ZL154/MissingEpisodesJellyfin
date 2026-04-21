@@ -313,7 +313,9 @@ public class MissingEpisodesService
                             Title = null,
                             Overview = "Inferred from episode-number gap. Enable 'Display missing episodes within seasons' in your Jellyfin library settings for titles and air dates.",
                             JellyfinEpisodeId = null,
-                            ThumbnailUrl = null
+                            // No episode-level image exists; fall back to the series poster
+                            // so the row isn't an ugly blank placeholder.
+                            ThumbnailUrl = "jellyfin:" + series.Id.ToString("N")
                         });
                     }
                 }
