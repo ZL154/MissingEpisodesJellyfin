@@ -1,0 +1,21 @@
+[
+  {
+    "guid": "b7a24c68-7f3e-4c0a-9a9e-6e2b9e1a4f33",
+    "name": "Missing Episodes",
+    "description": "Scan your Jellyfin library, Sonarr, or TMDB for missing TV episodes and send them to Sonarr.",
+    "overview": "Finds the gaps in your TV library with three scan sources (Jellyfin virtual items, Sonarr, TMDB) plus a gap-detection fallback, a clean per-show detail view, bulk Sonarr search, an Ignored list, scan history, live progress, and a sidebar entry.",
+    "owner": "ZL154",
+    "category": "General",
+    "imageUrl": null,
+    "versions": [
+      {
+        "version": "0.2.0.0",
+        "changelog": "First public beta.\n- Sonarr / Jellyfin scan sources + Virtual / TMDB / Gap Jellyfin methods.\n- Bulk + per-season + per-episode Sonarr search.\n- Active / Ignored tabs, All / TV / Anime filter.\n- Storage chip, path pill, have/total per-season counts with mini progress bars.\n- Persistent results + scan history.\n- Background scan with live progress + completion toast.\n- Admin sidebar entry.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/ZL154/MissingEpisodesJellyfin/releases/download/v0.2.0/MissingEpisodes_0.2.0.0.zip",
+        "checksum": "a61749eff7d2c2ad32170b0456afbfda",
+        "timestamp": "2026-04-21T18:30:00Z"
+      }
+    ]
+  }
+]
