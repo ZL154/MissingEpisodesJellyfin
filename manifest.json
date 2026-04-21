@@ -9,8 +9,16 @@
     "imageUrl": null,
     "versions": [
       {
+        "version": "1.0.0.0",
+        "changelog": "1.0 release.\n- Jellyfin-only library size summing (no Sonarr required for the size chip).\n- Clear-history button.\n- Rescan single show from the detail view (no full rescan needed).\n- Sort by size or by completion progress.\n- Prefer Sonarr's series path when available — fixes stale Jellyfin paths.\n- All prior 0.2 features.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/ZL154/MissingEpisodesJellyfin/releases/download/v1.0.0/MissingEpisodes_1.0.0.0.zip",
+        "checksum": "9589908d77011a031a3197a4cd78e375",
+        "timestamp": "2026-04-21T18:45:00Z"
+      },
+      {
         "version": "0.2.0.0",
-        "changelog": "First public beta.\n- Sonarr / Jellyfin scan sources + Virtual / TMDB / Gap Jellyfin methods.\n- Bulk + per-season + per-episode Sonarr search.\n- Active / Ignored tabs, All / TV / Anime filter.\n- Storage chip, path pill, have/total per-season counts with mini progress bars.\n- Persistent results + scan history.\n- Background scan with live progress + completion toast.\n- Admin sidebar entry.",
+        "changelog": "First public beta.",
         "targetAbi": "10.11.0.0",
         "sourceUrl": "https://github.com/ZL154/MissingEpisodesJellyfin/releases/download/v0.2.0/MissingEpisodes_0.2.0.0.zip",
         "checksum": "a61749eff7d2c2ad32170b0456afbfda",

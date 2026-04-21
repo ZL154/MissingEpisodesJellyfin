@@ -99,6 +99,28 @@ public class MissingEpisodesController : ControllerBase
     [ProducesResponseType(typeof(List<ScanHistoryEntry>), StatusCodes.Status200OK)]
     public ActionResult GetHistory() => Ok(_service.LoadHistory());
 
+    [HttpDelete("history")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public ActionResult ClearHistory()
+    {
+        _service.ClearHistory();
+        return NoContent();
+    }
+
+    [HttpPost("series/{tvdbId:int}/refresh")]
+    [ProducesResponseType(typeof(ScanSeries), StatusCodes.Status200OK)]
+    public async Task<ActionResult> RefreshOne(int tvdbId, System.Threading.CancellationToken ct)
+    {
+        try
+        {
+            var updated = await _service.RefreshSeriesAsync(tvdbId, ct).ConfigureAwait(false);
+            if (updated == null) return NotFound(new { error = "Series not found." });
+            return Ok(updated);
+        }
+        catch (System.InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        catch (System.Net.Http.HttpRequestException ex) { return StatusCode(502, new { error = ex.Message }); }
+    }
+
     [HttpGet("last")]
     [ProducesResponseType(typeof(ScanResult), StatusCodes.Status200OK)]
     public ActionResult GetLast()

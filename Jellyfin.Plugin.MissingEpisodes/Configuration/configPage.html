@@ -459,6 +459,7 @@
           <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m9 6 6 6-6 6"/></svg>
           Scan history <span id="meHistoryCount" style="color:var(--dim-2);font-weight:500;margin-left:.3rem;"></span>
         </h4>
+        <button type="button" class="me-btn subtle" id="meHistoryClear" style="font-size:.72rem;padding:.25rem .55rem;">Clear</button>
       </div>
       <div class="me-history-body" id="meHistoryBody"></div>
     </div>
@@ -481,6 +482,8 @@
         <button type="button" data-v="count" class="active">Most missing</button>
         <button type="button" data-v="title">Title</button>
         <button type="button" data-v="recent">Recent</button>
+        <button type="button" data-v="size">Size</button>
+        <button type="button" data-v="progress">Progress</button>
       </div>
       <button type="button" class="me-btn" id="meBulkSearchBtn" title="Send all visible missing episodes to Sonarr">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v14M5 9l7 7 7-7M5 22h14"/></svg>
@@ -517,6 +520,10 @@
           <button type="button" class="me-btn primary" id="meDetailSearchAll">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
             Search all missing
+          </button>
+          <button type="button" class="me-btn" id="meDetailRescan">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+            Rescan this show
           </button>
           <button type="button" class="me-btn danger" id="meDetailIgnore">Ignore this show</button>
         </div>
@@ -909,6 +916,14 @@
         });
         if (state.sort === 'title') {
             list.sort(function (a, b) { return a.Title.localeCompare(b.Title); });
+        } else if (state.sort === 'size') {
+            list.sort(function (a, b) { return (b.SizeOnDisk || 0) - (a.SizeOnDisk || 0); });
+        } else if (state.sort === 'progress') {
+            list.sort(function (a, b) {
+                var ap = a.TotalEpisodes > 0 ? a.HaveEpisodes / a.TotalEpisodes : 0;
+                var bp = b.TotalEpisodes > 0 ? b.HaveEpisodes / b.TotalEpisodes : 0;
+                return ap - bp; // least-complete first (most work to do)
+            });
         } else if (state.sort === 'recent' && state.scope === 'active') {
             list.sort(function (a, b) {
                 var am = (a.Missing || []).reduce(function (acc, m) { var t = m.AirDateUtc ? Date.parse(m.AirDateUtc) : 0; return t > acc ? t : acc; }, 0);
@@ -1282,8 +1297,58 @@
         if (e.key === 'Escape' && $('#meDetail').classList.contains('open')) closeDetail();
     });
 
-    $('#meHistoryHead').addEventListener('click', function () {
+    $('#meHistoryHead').addEventListener('click', function (e) {
+        if (e.target.closest('#meHistoryClear')) return;
         $('#meHistory').classList.toggle('open');
+    });
+    $('#meHistoryClear').addEventListener('click', function (e) {
+        e.stopPropagation();
+        if (!confirm('Clear the entire scan history?')) return;
+        request('Plugins/MissingEpisodes/history', { type: 'DELETE', dataType: 'text' })
+            .then(function () { toast('History cleared', 'ok'); renderHistory([]); })
+            .catch(function (err) { toast(parseError(err), 'err'); });
+    });
+
+    $('#meDetailRescan').addEventListener('click', function () {
+        if (!state.current) return;
+        var id = state.current.TvdbId;
+        if (!id) { toast('No TVDB id — can\'t rescan just this show', 'err'); return; }
+        var btn = $('#meDetailRescan');
+        var originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="me-spinner"></span> Rescanning';
+        request('Plugins/MissingEpisodes/series/' + id + '/refresh', { type: 'POST', data: '{}' })
+            .then(function (updated) {
+                if (!updated) {
+                    toast('Series not found during rescan', 'err');
+                    return;
+                }
+                // Swap this show in both the list-view result and the current detail.
+                if (state.result && state.result.Series) {
+                    var idx = state.result.Series.findIndex(function (x) { return x.TvdbId === id; });
+                    if (idx >= 0) {
+                        if (updated.MissingCount === 0) state.result.Series.splice(idx, 1);
+                        else state.result.Series[idx] = updated;
+                    } else if (updated.MissingCount > 0) {
+                        state.result.Series.unshift(updated);
+                    }
+                    state.result.TotalMissing = state.result.Series.reduce(function (a, b) { return a + b.MissingCount; }, 0);
+                }
+                if (updated.MissingCount === 0) {
+                    toast('All caught up on ' + updated.Title + ' — no missing episodes', 'ok');
+                    closeDetail();
+                    render();
+                } else {
+                    openDetail(updated);
+                    toast('Rescanned · ' + updated.MissingCount + ' missing', 'ok');
+                    render();
+                }
+            })
+            .catch(function (err) { toast(parseError(err), 'err'); })
+            .finally(function () {
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
+            });
     });
 
     loadConfig().then(loadLast).then(loadHistory).then(resumeScanIfRunning);
