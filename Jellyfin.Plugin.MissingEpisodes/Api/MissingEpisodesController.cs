@@ -95,6 +95,25 @@ public class MissingEpisodesController : ControllerBase
     [ProducesResponseType(typeof(ScanProgress), StatusCodes.Status200OK)]
     public ActionResult GetProgress() => Ok(_service.Progress);
 
+    // Diagnostic: inspect what the filename parser extracts for a given series path.
+    // Admin-only (same as every other endpoint).
+    [HttpGet("debug/parse")]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    public ActionResult DebugParse([FromQuery] string path)
+    {
+        var (size, eps) = MissingEpisodesService.DebugScanSeriesFolder(path);
+        var sample = eps.Take(20).Select(e => new { season = e.season, episode = e.episode }).ToList();
+        var seasonsDistinct = eps.Select(e => e.season).Distinct().OrderBy(x => x).ToList();
+        return Ok(new
+        {
+            path,
+            size,
+            epCount = eps.Count,
+            seasons = seasonsDistinct,
+            sample
+        });
+    }
+
     [HttpGet("history")]
     [ProducesResponseType(typeof(List<ScanHistoryEntry>), StatusCodes.Status200OK)]
     public ActionResult GetHistory() => Ok(_service.LoadHistory());

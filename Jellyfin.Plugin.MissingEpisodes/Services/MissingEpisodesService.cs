@@ -384,6 +384,24 @@ public class MissingEpisodesService
             Series = new List<ScanSeries>()
         };
 
+        // Pull Sonarr's series list up front (if configured) so the filename parser can
+        // fall back to Sonarr's path when Jellyfin's path is stale — typical case when
+        // files moved and Jellyfin's library wasn't rescanned.
+        Dictionary<int, SonarrSeries>? sonarrByTvdb = null;
+        if (IsSonarrConfigured(cfg))
+        {
+            try
+            {
+                var all = await _sonarr.GetSeriesAsync(cfg.SonarrUrl, cfg.SonarrApiKey, ct).ConfigureAwait(false);
+                sonarrByTvdb = new Dictionary<int, SonarrSeries>();
+                foreach (var s in all) if (s.TvdbId > 0) sonarrByTvdb[s.TvdbId] = s;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to pre-fetch Sonarr series list; path fallback disabled for this scan.");
+            }
+        }
+
         var ignoredTvdb = new HashSet<int>(cfg.IgnoredSeriesTvdbIds);
 
         var seriesItems = _libraryManager.GetItemList(new InternalItemsQuery
@@ -422,7 +440,13 @@ public class MissingEpisodesService
                 continue;
             }
 
-            var entry = await ProcessJellyfinSeriesAsync(cfg, series, mode, ct).ConfigureAwait(false);
+            string? sonarrPath = null;
+            if (sonarrByTvdb != null && tvdbId > 0 && sonarrByTvdb.TryGetValue(tvdbId, out var sS))
+            {
+                sonarrPath = sS.Path;
+            }
+
+            var entry = await ProcessJellyfinSeriesAsync(cfg, series, mode, sonarrPath, ct).ConfigureAwait(false);
             if (entry != null) result.Series.Add(entry);
         }
 
@@ -665,7 +689,19 @@ public class MissingEpisodesService
         if (mode == "tmdb" && string.IsNullOrWhiteSpace(cfg.TmdbApiKey))
             throw new InvalidOperationException("TMDB mode requires a TMDB API key in settings.");
 
-        var updated = await ProcessJellyfinSeriesAsync(cfg, match, mode, ct).ConfigureAwait(false);
+        // For rescan-one, also fetch Sonarr's path fallback if available.
+        string? sonarrPathFallback = null;
+        if (sonarrReady && tvdbId > 0)
+        {
+            try
+            {
+                var s = await _sonarr.GetSeriesByTvdbAsync(cfg.SonarrUrl, cfg.SonarrApiKey, tvdbId, ct).ConfigureAwait(false);
+                sonarrPathFallback = s?.Path;
+            }
+            catch { /* best-effort */ }
+        }
+
+        var updated = await ProcessJellyfinSeriesAsync(cfg, match, mode, sonarrPathFallback, ct).ConfigureAwait(false);
         if (updated != null && sonarrReady)
         {
             await EnrichOneFromSonarrAsync(cfg, updated, ct).ConfigureAwait(false);
@@ -689,7 +725,7 @@ public class MissingEpisodesService
     // Missing = entries in expected not in present.
     //
     // Returns null for ignored series or ones with nothing missing.
-    private async Task<ScanSeries?> ProcessJellyfinSeriesAsync(PluginConfiguration cfg, Series series, string mode, CancellationToken ct)
+    private async Task<ScanSeries?> ProcessJellyfinSeriesAsync(PluginConfiguration cfg, Series series, string mode, string? sonarrPathFallback, CancellationToken ct)
     {
         var ignoredTvdb = new HashSet<int>(cfg.IgnoredSeriesTvdbIds);
         var tvdbStr = series.GetProviderId(MetadataProvider.Tvdb);
@@ -747,9 +783,26 @@ public class MissingEpisodesService
             }
         }
 
-        // Walk the folder once for size + filename-parsed episodes. This catches the
+        // Walk the folder for size + filename-parsed episodes. This catches the
         // Office/TMNT case where files exist but Jellyfin's library never imported them.
+        // If Jellyfin's path turns up nothing (stale path after a move), try Sonarr's
+        // path for the same series before giving up.
         var (sizeOnDisk, filenameEps) = ScanSeriesFolder(series.Path);
+        var usedPath = series.Path;
+        if ((filenameEps.Count == 0 || sizeOnDisk == 0)
+            && !string.IsNullOrEmpty(sonarrPathFallback)
+            && !string.Equals(series.Path, sonarrPathFallback, StringComparison.Ordinal))
+        {
+            var (altSize, altEps) = ScanSeriesFolder(sonarrPathFallback);
+            if (altEps.Count > filenameEps.Count || altSize > sizeOnDisk)
+            {
+                sizeOnDisk = altSize;
+                filenameEps = altEps;
+                usedPath = sonarrPathFallback;
+            }
+        }
+        _logger.LogInformation("MissingEpisodes.FileScan {Title} path='{Path}' size={Size} parsed={Parsed}",
+            series.Name, usedPath ?? "<null>", sizeOnDisk, filenameEps.Count);
         foreach (var (s, e) in filenameEps)
         {
             if (cfg.IgnoreSpecials && s == 0) continue;
@@ -870,7 +923,7 @@ public class MissingEpisodesService
             Year = series.ProductionYear ?? 0,
             Network = series.Studios?.FirstOrDefault(),
             Status = series.Status?.ToString(),
-            Path = series.Path,
+            Path = usedPath ?? series.Path,
             SeriesType = InferJellyfinSeriesType(series),
             PosterUrl = "jellyfin:" + jfSeriesId,
             BackdropUrl = "jellyfin-backdrop:" + jfSeriesId,
@@ -1070,6 +1123,9 @@ public class MissingEpisodesService
     {
         ".mkv", ".mp4", ".avi", ".m4v", ".mov", ".wmv", ".flv", ".webm", ".ts", ".mpg", ".mpeg"
     };
+
+    public static (long size, List<(int season, int episode)> episodes) DebugScanSeriesFolder(string? path)
+        => ScanSeriesFolder(path);
 
     // Walk a series folder once: sum file sizes AND parse episode coordinates from
     // filenames. The parser is the safety net for shows where Jellyfin's library is
