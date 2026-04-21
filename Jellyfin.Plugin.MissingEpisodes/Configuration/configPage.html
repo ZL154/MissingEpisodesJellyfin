@@ -349,6 +349,10 @@
             <label for="meInterval">Auto-search every (hours)</label>
             <input type="number" id="meInterval" min="1" max="720" step="1" value="24" />
           </div>
+          <div class="me-field" style="grid-column: 1 / -1;">
+            <label for="meTmdbKey">TMDB API key <span style="color:var(--dim-2);text-transform:none;letter-spacing:0;">(optional — lets Jellyfin scans work without library virtual-items)</span></label>
+            <input type="password" id="meTmdbKey" placeholder="themoviedb.org &rarr; Settings &rarr; API" autocomplete="new-password" spellcheck="false" />
+          </div>
         </div>
 
         <div class="me-toggle-row">
@@ -359,7 +363,8 @@
         </div>
 
         <div style="display:flex;gap:.5rem;margin-top:1.1rem;flex-wrap:wrap;align-items:center;">
-          <button type="button" class="me-btn" id="meTestBtn">Test connection</button>
+          <button type="button" class="me-btn" id="meTestBtn">Test Sonarr</button>
+          <button type="button" class="me-btn" id="meTestTmdbBtn">Test TMDB</button>
           <button type="button" class="me-btn primary" id="meSaveBtn">Save</button>
           <span id="meCfgStatus" class="me-cfg-status"></span>
         </div>
@@ -549,6 +554,7 @@
             state.cfg = cfg || {};
             $('#meSonarrUrl').value = cfg.SonarrUrl || '';
             $('#meSonarrKey').value = cfg.SonarrApiKey || '';
+            $('#meTmdbKey').value = cfg.TmdbApiKey || '';
             $('#meInterval').value = cfg.AutoSearchIntervalHours || 24;
             $('#meAutoSearch').checked = !!cfg.AutoSearchEnabled;
             $('#meOnlyMonitored').checked = cfg.OnlyMonitored !== false;
@@ -577,6 +583,7 @@
     function saveConfig() {
         state.cfg.SonarrUrl = $('#meSonarrUrl').value.trim();
         state.cfg.SonarrApiKey = $('#meSonarrKey').value.trim();
+        state.cfg.TmdbApiKey = $('#meTmdbKey').value.trim();
         state.cfg.ScanSource = getSeg('#meSourceSeg') || 'sonarr';
         state.cfg.AutoSearchEnabled = $('#meAutoSearch').checked;
         state.cfg.OnlyMonitored = $('#meOnlyMonitored').checked;
@@ -972,6 +979,18 @@
 
     $('#meCfgToggle').addEventListener('click', function () { openCfg(); });
     $('#meTestBtn').addEventListener('click', testConnection);
+    $('#meTestTmdbBtn').addEventListener('click', function () {
+        var s = $('#meCfgStatus');
+        s.className = 'me-cfg-status';
+        s.innerHTML = '<span class="me-spinner"></span> Testing TMDB...';
+        var body = JSON.stringify({ apiKey: $('#meTmdbKey').value.trim() });
+        request('Plugins/MissingEpisodes/tmdb/test', { type: 'POST', data: body }).then(function (r) {
+            if (r.ok) { s.className = 'me-cfg-status ok'; s.textContent = 'TMDB key works.'; toast('TMDB OK', 'ok'); }
+            else { s.className = 'me-cfg-status err'; s.textContent = 'TMDB failed: ' + (r.error || 'unknown'); toast('TMDB failed: ' + (r.error || 'unknown'), 'err'); }
+        }).catch(function (e) {
+            s.className = 'me-cfg-status err'; s.textContent = parseError(e); toast(parseError(e), 'err');
+        });
+    });
     $('#meSaveBtn').addEventListener('click', saveConfig);
     $('#meScanBtn').addEventListener('click', scan);
     $('#meEmptyCta').addEventListener('click', function () { openCfg(true); });

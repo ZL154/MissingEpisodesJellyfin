@@ -29,6 +29,10 @@ public class PluginConfiguration : BasePluginConfiguration
     // Max episodes to send in a single Sonarr search command to avoid thrashing the indexer.
     public int AutoSearchBatchLimit { get; set; } = 50;
 
+    // TMDB v3 API key — optional. Used as a fallback source of expected-episode
+    // data in Jellyfin scan mode when the library doesn't have virtual items.
+    public string TmdbApiKey { get; set; } = string.Empty;
+
     public string? LastScanIso { get; set; }
 
     public string? LastAutoSearchIso { get; set; }

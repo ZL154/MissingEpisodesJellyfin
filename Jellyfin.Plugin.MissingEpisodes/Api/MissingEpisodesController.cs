@@ -37,6 +37,18 @@ public class MissingEpisodesController : ControllerBase
         return Ok(new { ok, error });
     }
 
+    public record TestTmdbRequest(string? ApiKey);
+
+    [HttpPost("tmdb/test")]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    public async Task<ActionResult> TestTmdb([FromBody] TestTmdbRequest req, CancellationToken ct)
+    {
+        var cfg = Plugin.Instance?.Configuration;
+        var key = string.IsNullOrWhiteSpace(req.ApiKey) ? cfg?.TmdbApiKey ?? string.Empty : req.ApiKey!;
+        var (ok, error) = await _service.Tmdb.TestAsync(key, ct).ConfigureAwait(false);
+        return Ok(new { ok, error });
+    }
+
     public record ScanRequest(string? Source);
 
     [HttpPost("scan")]

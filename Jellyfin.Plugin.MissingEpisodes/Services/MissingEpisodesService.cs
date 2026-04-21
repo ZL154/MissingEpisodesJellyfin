@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.MissingEpisodes.Configuration;
 using Jellyfin.Plugin.MissingEpisodes.Sonarr;
+using Jellyfin.Plugin.MissingEpisodes.Tmdb;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
@@ -17,6 +18,7 @@ namespace Jellyfin.Plugin.MissingEpisodes.Services;
 public class MissingEpisodesService
 {
     private readonly SonarrClient _sonarr;
+    private readonly TmdbClient _tmdb;
     private readonly ILibraryManager _libraryManager;
     private readonly ILogger<MissingEpisodesService> _logger;
 
@@ -24,12 +26,15 @@ public class MissingEpisodesService
     private ScanResult? _lastResult;
     public ScanProgress Progress { get; } = new();
 
-    public MissingEpisodesService(SonarrClient sonarr, ILibraryManager libraryManager, ILogger<MissingEpisodesService> logger)
+    public MissingEpisodesService(SonarrClient sonarr, TmdbClient tmdb, ILibraryManager libraryManager, ILogger<MissingEpisodesService> logger)
     {
         _sonarr = sonarr;
+        _tmdb = tmdb;
         _libraryManager = libraryManager;
         _logger = logger;
     }
+
+    public TmdbClient Tmdb => _tmdb;
 
     public ScanResult? LastResult => _lastResult;
 
@@ -69,7 +74,7 @@ public class MissingEpisodesService
             ScanResult result;
             if (useJellyfin)
             {
-                result = ScanJellyfinOnly(cfg);
+                result = await ScanJellyfinOnlyAsync(cfg, ct).ConfigureAwait(false);
                 if (sonarrReady)
                 {
                     // Only enrich with Sonarr episode IDs (for searching). Don't replace Jellyfin's
@@ -192,7 +197,7 @@ public class MissingEpisodesService
         return result;
     }
 
-    private ScanResult ScanJellyfinOnly(PluginConfiguration cfg)
+    private async Task<ScanResult> ScanJellyfinOnlyAsync(PluginConfiguration cfg, CancellationToken ct)
     {
         var now = DateTime.UtcNow;
         var result = new ScanResult
@@ -285,38 +290,53 @@ public class MissingEpisodesService
                 });
             }
 
-            // Fallback: no virtual items in this library, so infer gaps from the
-            // existing episode numbering. Only finds holes (E01, E02, _, E04) —
-            // cannot detect whole missing seasons or trailing episodes past the
-            // highest present one. Flag this so the UI can say "gap detection".
+            // No virtual items → try TMDB (if key + tmdb id available), else gap-detect.
             if (!virtualExisted)
             {
-                foreach (var kv in realBySeason)
-                {
-                    var sn = kv.Key;
-                    var present = kv.Value;
-                    if (present.Count == 0) continue;
-                    var max = present.Max();
-                    for (var n = 1; n <= max; n++)
-                    {
-                        if (present.Contains(n)) continue;
-                        // Bump Total and leave Have alone so the season counts stay honest.
-                        if (!seasonStats.TryGetValue(sn, out var stats2)) stats2 = new SeasonCount();
-                        stats2.Total += 1;
-                        seasonStats[sn] = stats2;
+                var tmdbStr = series.GetProviderId(MetadataProvider.Tmdb);
+                int.TryParse(tmdbStr, out var tmdbId);
+                var tmdbWorked = false;
 
-                        missing.Add(new MissingEpisode
+                if (!string.IsNullOrWhiteSpace(cfg.TmdbApiKey) && tmdbId > 0)
+                {
+                    try
+                    {
+                        tmdbWorked = await FillMissingFromTmdbAsync(
+                            cfg, tmdbId, realBySeason, missing, seasonStats, now, ct).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "TMDB fetch failed for {Title} ({Tmdb})", series.Name, tmdbId);
+                    }
+                }
+
+                if (!tmdbWorked)
+                {
+                    // Gap detection: E01, E02, _, E04 → flag E03. Can't detect trailing episodes.
+                    foreach (var kv in realBySeason)
+                    {
+                        var sn = kv.Key;
+                        var present = kv.Value;
+                        if (present.Count == 0) continue;
+                        var max = present.Max();
+                        for (var n = 1; n <= max; n++)
                         {
-                            Id = 0,
-                            SeasonNumber = sn,
-                            EpisodeNumber = n,
-                            Title = null,
-                            Overview = "Inferred from episode-number gap. Enable 'Display missing episodes within seasons' in your Jellyfin library settings for titles and air dates.",
-                            JellyfinEpisodeId = null,
-                            // No episode-level image exists; fall back to the series poster
-                            // so the row isn't an ugly blank placeholder.
-                            ThumbnailUrl = "jellyfin:" + series.Id.ToString("N")
-                        });
+                            if (present.Contains(n)) continue;
+                            if (!seasonStats.TryGetValue(sn, out var stats2)) stats2 = new SeasonCount();
+                            stats2.Total += 1;
+                            seasonStats[sn] = stats2;
+
+                            missing.Add(new MissingEpisode
+                            {
+                                Id = 0,
+                                SeasonNumber = sn,
+                                EpisodeNumber = n,
+                                Title = null,
+                                Overview = "Inferred from episode-number gap. Add a TMDB API key or enable 'Display missing episodes within seasons' for full episode details.",
+                                JellyfinEpisodeId = null,
+                                ThumbnailUrl = "jellyfin:" + series.Id.ToString("N")
+                            });
+                        }
                     }
                 }
             }
@@ -352,6 +372,76 @@ public class MissingEpisodesService
 
         FinalizeResult(result);
         return result;
+    }
+
+    private async Task<bool> FillMissingFromTmdbAsync(
+        PluginConfiguration cfg,
+        int tmdbId,
+        Dictionary<int, HashSet<int>> realBySeason,
+        List<MissingEpisode> missing,
+        Dictionary<int, SeasonCount> seasonStats,
+        DateTime now,
+        CancellationToken ct)
+    {
+        var detail = await _tmdb.GetSeriesAsync(cfg.TmdbApiKey, tmdbId, ct).ConfigureAwait(false);
+        if (detail?.Seasons == null || detail.Seasons.Count == 0) return false;
+
+        // Union of seasons TMDB knows about and seasons Jellyfin has real files for.
+        var allSeasons = new HashSet<int>();
+        foreach (var s in detail.Seasons) allSeasons.Add(s.SeasonNumber);
+        foreach (var s in realBySeason.Keys) allSeasons.Add(s);
+
+        foreach (var sn in allSeasons)
+        {
+            if (cfg.IgnoreSpecials && sn == 0) continue;
+
+            TmdbSeasonDetail? season;
+            try
+            {
+                season = await _tmdb.GetSeasonAsync(cfg.TmdbApiKey, tmdbId, sn, ct).ConfigureAwait(false);
+            }
+            catch (System.Net.Http.HttpRequestException)
+            {
+                continue;
+            }
+            if (season?.Episodes == null) continue;
+
+            realBySeason.TryGetValue(sn, out var realSet);
+            realSet ??= new HashSet<int>();
+
+            foreach (var ep in season.Episodes)
+            {
+                DateTime? air = null;
+                if (!string.IsNullOrWhiteSpace(ep.AirDate)
+                    && DateTime.TryParse(ep.AirDate, System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+                        out var parsed))
+                {
+                    air = parsed;
+                }
+                if (cfg.IgnoreUnaired && (!air.HasValue || air.Value > now)) continue;
+
+                if (!seasonStats.TryGetValue(sn, out var stats)) stats = new SeasonCount();
+                stats.Total += 1;
+                if (realSet.Contains(ep.EpisodeNumber)) stats.Have += 1;
+                seasonStats[sn] = stats;
+
+                if (realSet.Contains(ep.EpisodeNumber)) continue;
+
+                var thumb = !string.IsNullOrEmpty(ep.StillPath) ? TmdbClient.ImageBase + ep.StillPath : null;
+                missing.Add(new MissingEpisode
+                {
+                    Id = 0,
+                    SeasonNumber = sn,
+                    EpisodeNumber = ep.EpisodeNumber,
+                    Title = ep.Name,
+                    AirDateUtc = air,
+                    Overview = ep.Overview,
+                    ThumbnailUrl = thumb
+                });
+            }
+        }
+        return true;
     }
 
     private async Task EnrichWithSonarrIdsAsync(PluginConfiguration cfg, ScanResult result, CancellationToken ct)
