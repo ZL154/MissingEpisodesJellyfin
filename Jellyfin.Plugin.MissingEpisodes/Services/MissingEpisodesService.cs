@@ -230,6 +230,12 @@ public class MissingEpisodesService
             var seasonStats = new Dictionary<int, SeasonCount>();
             var missing = new List<MissingEpisode>();
 
+            // Real (on-disk) episode numbers per season — used both for Have counts
+            // and for gap-detection fallback when the library hasn't created virtual
+            // items for missing episodes.
+            var realBySeason = new Dictionary<int, HashSet<int>>();
+            var virtualExisted = false;
+
             foreach (var e in allEps)
             {
                 if (e is not Episode episode) continue;
@@ -244,7 +250,6 @@ public class MissingEpisodesService
                 if (cfg.IgnoreUnaired && unaired) continue;
 
                 if (!seasonStats.TryGetValue(season.Value, out var stats)) stats = new SeasonCount();
-                // For multi-episode files in Jellyfin the range is IndexNumber..IndexNumberEnd
                 var start = num.Value;
                 var end = episode.IndexNumberEnd ?? start;
                 for (var n = start; n <= end; n++)
@@ -254,8 +259,18 @@ public class MissingEpisodesService
                 }
                 seasonStats[season.Value] = stats;
 
-                if (!isVirtual) continue;
+                if (!isVirtual)
+                {
+                    if (!realBySeason.TryGetValue(season.Value, out var realSet))
+                    {
+                        realSet = new HashSet<int>();
+                        realBySeason[season.Value] = realSet;
+                    }
+                    for (var n = start; n <= end; n++) realSet.Add(n);
+                    continue;
+                }
 
+                virtualExisted = true;
                 var jfEpId = episode.Id.ToString("N");
                 missing.Add(new MissingEpisode
                 {
@@ -268,6 +283,40 @@ public class MissingEpisodesService
                     JellyfinEpisodeId = jfEpId,
                     ThumbnailUrl = "jellyfin:" + jfEpId
                 });
+            }
+
+            // Fallback: no virtual items in this library, so infer gaps from the
+            // existing episode numbering. Only finds holes (E01, E02, _, E04) —
+            // cannot detect whole missing seasons or trailing episodes past the
+            // highest present one. Flag this so the UI can say "gap detection".
+            if (!virtualExisted)
+            {
+                foreach (var kv in realBySeason)
+                {
+                    var sn = kv.Key;
+                    var present = kv.Value;
+                    if (present.Count == 0) continue;
+                    var max = present.Max();
+                    for (var n = 1; n <= max; n++)
+                    {
+                        if (present.Contains(n)) continue;
+                        // Bump Total and leave Have alone so the season counts stay honest.
+                        if (!seasonStats.TryGetValue(sn, out var stats2)) stats2 = new SeasonCount();
+                        stats2.Total += 1;
+                        seasonStats[sn] = stats2;
+
+                        missing.Add(new MissingEpisode
+                        {
+                            Id = 0,
+                            SeasonNumber = sn,
+                            EpisodeNumber = n,
+                            Title = null,
+                            Overview = "Inferred from episode-number gap. Enable 'Display missing episodes within seasons' in your Jellyfin library settings for titles and air dates.",
+                            JellyfinEpisodeId = null,
+                            ThumbnailUrl = null
+                        });
+                    }
+                }
             }
 
             if (missing.Count == 0) continue;
