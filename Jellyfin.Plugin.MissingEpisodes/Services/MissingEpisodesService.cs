@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
@@ -421,144 +422,8 @@ public class MissingEpisodesService
                 continue;
             }
 
-            var allEps = _libraryManager.GetItemList(new InternalItemsQuery
-            {
-                IncludeItemTypes = new[] { BaseItemKind.Episode },
-                AncestorIds = new[] { series.Id },
-                Recursive = true
-            });
-
-            var seasonStats = new Dictionary<int, SeasonCount>();
-            var missing = new List<MissingEpisode>();
-
-            // Real (on-disk) episode numbers per season — used for Have counts
-            // and for gap-detection / TMDB diffing.
-            var realBySeason = new Dictionary<int, HashSet<int>>();
-
-            foreach (var e in allEps)
-            {
-                if (e is not Episode episode) continue;
-                var season = episode.ParentIndexNumber;
-                var num = episode.IndexNumber;
-                if (!season.HasValue || !num.HasValue) continue;
-                if (cfg.IgnoreSpecials && season.Value == 0) continue;
-
-                var isVirtual = episode.IsVirtualItem;
-                var air = episode.PremiereDate;
-                var unaired = !air.HasValue || air.Value.ToUniversalTime() > now;
-                if (cfg.IgnoreUnaired && unaired) continue;
-
-                if (!seasonStats.TryGetValue(season.Value, out var stats)) stats = new SeasonCount();
-                var start = num.Value;
-                var end = episode.IndexNumberEnd ?? start;
-                for (var n = start; n <= end; n++)
-                {
-                    stats.Total += 1;
-                    if (!isVirtual) stats.Have += 1;
-                }
-                seasonStats[season.Value] = stats;
-
-                if (!isVirtual)
-                {
-                    if (!realBySeason.TryGetValue(season.Value, out var realSet))
-                    {
-                        realSet = new HashSet<int>();
-                        realBySeason[season.Value] = realSet;
-                    }
-                    for (var n = start; n <= end; n++) realSet.Add(n);
-                    continue;
-                }
-
-                // Only keep virtual items if the user picked that mode.
-                if (mode != "virtual") continue;
-
-                var jfEpId = episode.Id.ToString("N");
-                missing.Add(new MissingEpisode
-                {
-                    Id = 0,
-                    SeasonNumber = season.Value,
-                    EpisodeNumber = num.Value,
-                    Title = episode.Name,
-                    AirDateUtc = air?.ToUniversalTime(),
-                    Overview = episode.Overview,
-                    JellyfinEpisodeId = jfEpId,
-                    ThumbnailUrl = "jellyfin:" + jfEpId
-                });
-            }
-
-            // If mode is TMDB, fetch per-series from TMDB (only needs a TMDB id).
-            if (mode == "tmdb" && tmdbIdSeries > 0)
-            {
-                try
-                {
-                    await FillMissingFromTmdbAsync(
-                        cfg, tmdbIdSeries, realBySeason, missing, seasonStats, now, ct).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "TMDB fetch failed for {Title} ({Tmdb})", series.Name, tmdbIdSeries);
-                }
-            }
-
-            // Gap mode: infer missing eps purely from on-disk numbering holes.
-            if (mode == "gap")
-            {
-                foreach (var kv in realBySeason)
-                {
-                    var sn = kv.Key;
-                    var present = kv.Value;
-                    if (present.Count == 0) continue;
-                    var max = present.Max();
-                    for (var n = 1; n <= max; n++)
-                    {
-                        if (present.Contains(n)) continue;
-                        if (!seasonStats.TryGetValue(sn, out var stats2)) stats2 = new SeasonCount();
-                        stats2.Total += 1;
-                        seasonStats[sn] = stats2;
-
-                        missing.Add(new MissingEpisode
-                        {
-                            Id = 0,
-                            SeasonNumber = sn,
-                            EpisodeNumber = n,
-                            Title = null,
-                            Overview = "Inferred from numbering gap in the Jellyfin library.",
-                            JellyfinEpisodeId = null,
-                            ThumbnailUrl = "jellyfin:" + series.Id.ToString("N")
-                        });
-                    }
-                }
-            }
-
-            if (missing.Count == 0) continue;
-
-            var jfSeriesId = series.Id.ToString("N");
-            result.Series.Add(new ScanSeries
-            {
-                SonarrId = 0,
-                TvdbId = tvdbId,
-                TmdbId = tmdbIdSeries,
-                JellyfinSeriesId = jfSeriesId,
-                Title = series.Name,
-                Year = series.ProductionYear ?? 0,
-                Network = series.Studios?.FirstOrDefault(),
-                Status = series.Status?.ToString(),
-                Path = series.Path,
-                SeriesType = InferJellyfinSeriesType(series),
-                PosterUrl = "jellyfin:" + jfSeriesId,
-                BackdropUrl = "jellyfin-backdrop:" + jfSeriesId,
-                MissingCount = missing.Count,
-                HaveEpisodes = seasonStats.Values.Sum(x => x.Have),
-                TotalEpisodes = seasonStats.Values.Sum(x => x.Total),
-                SizeOnDisk = ComputeDirSize(series.Path),
-                Seasons = seasonStats.OrderBy(kv => kv.Key).Select(kv => new SeasonSummary
-                {
-                    SeasonNumber = kv.Key,
-                    TotalEpisodes = kv.Value.Total,
-                    HaveEpisodes = kv.Value.Have
-                }).ToList(),
-                Missing = missing
-            });
+            var entry = await ProcessJellyfinSeriesAsync(cfg, series, mode, ct).ConfigureAwait(false);
+            if (entry != null) result.Series.Add(entry);
         }
 
         FinalizeResult(result);
@@ -808,7 +673,7 @@ public class MissingEpisodesService
     }
 
     // Extracted per-series builder for Jellyfin scans. Used by both the full scan and the
-    // per-show refresh. Returns null for ignored series or ones we can't parse.
+    // per-show refresh. Returns null for ignored series or ones with nothing missing.
     private async Task<ScanSeries?> ProcessJellyfinSeriesAsync(PluginConfiguration cfg, Series series, string mode, CancellationToken ct)
     {
         var ignoredTvdb = new HashSet<int>(cfg.IgnoredSeriesTvdbIds);
@@ -879,6 +744,39 @@ public class MissingEpisodesService
             });
         }
 
+        // Walk the series folder once for size + filename-parsed episode coords.
+        // Merge filename-parsed episodes into realBySeason — catches episodes that
+        // are on disk but Jellyfin's library never imported or indexed (the exact
+        // class of bug where Have=0/186 despite 144GB sitting right there).
+        var (sizeOnDisk, filenameEps) = ScanSeriesFolder(series.Path);
+        foreach (var (s, e) in filenameEps)
+        {
+            if (cfg.IgnoreSpecials && s == 0) continue;
+            if (!realBySeason.TryGetValue(s, out var realSet))
+            {
+                realSet = new HashSet<int>();
+                realBySeason[s] = realSet;
+            }
+            if (!realSet.Add(e)) continue; // Jellyfin already knew about this one as real
+
+            // Was this episode in the missing list (Jellyfin knew it as virtual)?
+            // If so, it's actually present → drop from missing + bump Have only.
+            // Otherwise Jellyfin had no record at all → bump both Total and Have.
+            var idx = missing.FindIndex(m => m.SeasonNumber == s && m.EpisodeNumber == e);
+            if (!seasonStats.TryGetValue(s, out var stat)) stat = new SeasonCount();
+            if (idx >= 0)
+            {
+                missing.RemoveAt(idx);
+                stat.Have += 1;
+            }
+            else
+            {
+                stat.Total += 1;
+                stat.Have += 1;
+            }
+            seasonStats[s] = stat;
+        }
+
         if (mode == "tmdb" && tmdbIdSeries > 0)
         {
             try
@@ -939,7 +837,7 @@ public class MissingEpisodesService
             MissingCount = missing.Count,
             HaveEpisodes = seasonStats.Values.Sum(x => x.Have),
             TotalEpisodes = seasonStats.Values.Sum(x => x.Total),
-            SizeOnDisk = ComputeDirSize(series.Path),
+            SizeOnDisk = sizeOnDisk,
             Seasons = seasonStats.OrderBy(kv => kv.Key).Select(kv => new SeasonSummary
             {
                 SeasonNumber = kv.Key,
@@ -1119,24 +1017,57 @@ public class MissingEpisodesService
             .ToList();
     }
 
-    // Sum file sizes under a Jellyfin series folder. Silent best-effort —
-    // missing / unreadable folders just return 0. Jellyfin's stored path
-    // can be stale; when that happens Sonarr enrichment backfills the size.
-    private static long ComputeDirSize(string? path)
+    // S01E05, s01e05, S1E5, multi-ep ranges like S01E01-E02 / S01E01E02.
+    private static readonly Regex SeasonEpisodeRegex = new(
+        @"[Ss](\d{1,3})[Ee](\d{1,3})(?:[-Ee](?:[Ee])?(\d{1,3}))?",
+        RegexOptions.Compiled);
+    // Alt '1x05' style (avoid matching parts of larger numbers).
+    private static readonly Regex AltSeasonEpisodeRegex = new(
+        @"(?<![0-9])(\d{1,2})x(\d{1,3})(?![0-9])",
+        RegexOptions.Compiled);
+    // Common video extensions Sonarr / Jellyfin care about.
+    private static readonly HashSet<string> VideoExts = new(StringComparer.OrdinalIgnoreCase)
     {
-        if (string.IsNullOrEmpty(path)) return 0;
+        ".mkv", ".mp4", ".avi", ".m4v", ".mov", ".wmv", ".flv", ".webm", ".ts", ".mpg", ".mpeg"
+    };
+
+    // Walk a series folder once: sum file sizes AND parse episode coordinates from
+    // filenames. The parser is the safety net for shows where Jellyfin's library is
+    // out of sync with the filesystem — files exist on disk but Jellyfin never
+    // imported them, so its library lists them as missing.
+    private static (long size, List<(int season, int episode)> episodes) ScanSeriesFolder(string? path)
+    {
+        var episodes = new List<(int, int)>();
+        if (string.IsNullOrEmpty(path)) return (0, episodes);
         try
         {
             var di = new DirectoryInfo(path);
-            if (!di.Exists) return 0;
+            if (!di.Exists) return (0, episodes);
             long total = 0;
             foreach (var f in di.EnumerateFiles("*", SearchOption.AllDirectories))
             {
                 try { total += f.Length; } catch { }
+                if (!VideoExts.Contains(f.Extension)) continue;
+
+                var m = SeasonEpisodeRegex.Match(f.Name);
+                if (m.Success)
+                {
+                    var s = int.Parse(m.Groups[1].Value);
+                    var e1 = int.Parse(m.Groups[2].Value);
+                    var e2 = m.Groups[3].Success ? int.Parse(m.Groups[3].Value) : e1;
+                    if (e2 < e1) e2 = e1; // malformed range — ignore
+                    for (var e = e1; e <= e2; e++) episodes.Add((s, e));
+                    continue;
+                }
+                var m2 = AltSeasonEpisodeRegex.Match(f.Name);
+                if (m2.Success)
+                {
+                    episodes.Add((int.Parse(m2.Groups[1].Value), int.Parse(m2.Groups[2].Value)));
+                }
             }
-            return total;
+            return (total, episodes);
         }
-        catch { return 0; }
+        catch { return (0, episodes); }
     }
 
     private static string? PickImage(List<SonarrImage>? images, string coverType)

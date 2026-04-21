@@ -9,6 +9,14 @@
     "imageUrl": null,
     "versions": [
       {
+        "version": "1.0.3.0",
+        "changelog": "Accuracy fix + security hardening.\n- Jellyfin scans now walk the series folder and parse S##E## / 1x05 patterns from filenames. Catches episodes that are on disk but Jellyfin's library never imported (was showing shows with 144 GB of files as 0/186).\n- XSS hardening: image URLs for posters/backdrops/thumbnails now set via JS with JSON.stringify escaping instead of inline style interpolation — can't break out of the url() literal.\n- Large internal refactor: the full Jellyfin scan now delegates per-series to the same helper the rescan-one button uses. No duplicated logic.\n- README rewritten with AchievementBadges-style copy-paste install block and security section.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/ZL154/MissingEpisodesJellyfin/releases/download/v1.0.3/MissingEpisodes_1.0.3.0.zip",
+        "checksum": "beacd9d6fc6185c2f08381367a26bcd0",
+        "timestamp": "2026-04-21T20:00:00Z"
+      },
+      {
         "version": "1.0.2.0",
         "changelog": "- Progress strip now shows during a single-show rescan (it was hidden because it lived inside the list-view container).\n- Click an ignored show to open its detail view; dedicated 'Remove from ignore list' button replaces the old confirm prompt.\n- README updated with new features and a note about the harmless 'error occurred while getting plugin details' warning for manually-installed copies.",
         "targetAbi": "10.11.0.0",

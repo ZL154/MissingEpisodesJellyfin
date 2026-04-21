@@ -585,6 +585,14 @@
         });
     }
 
+    // Apply a CSS background-image via JS after innerHTML is set.
+    // Using JSON.stringify gives us a properly-quoted string literal with all
+    // quotes and backslashes escaped, so a hostile URL can't break out of url().
+    function setBgImage(el, url) {
+        if (!el || !url) return;
+        el.style.backgroundImage = 'url(' + JSON.stringify(String(url)) + ')';
+    }
+
     function formatRelative(iso) {
         if (!iso) return 'Never';
         var d = new Date(iso); if (isNaN(d)) return 'Never';
@@ -963,8 +971,11 @@
                 ? '<span class="me-size-chip">' + formatBytes(s.SizeOnDisk) + '</span>'
                 : '';
             // Chip lives inside the poster so it stops overlapping the meta row below.
+            // URL is stashed in a data attribute and applied as a background-image via JS
+            // after innerHTML is set — avoids CSS-injection through single-quoted url() literals.
+            var posterData = posterUrl ? ' data-bg="' + escapeHtml(posterUrl) + '"' : '';
             var poster = posterUrl
-                ? '<div class="me-poster" style="background-image:url(\'' + escapeHtml(posterUrl) + '\');">' + sizeChip + '</div>'
+                ? '<div class="me-poster"' + posterData + '>' + sizeChip + '</div>'
                 : '<div class="me-poster"><div class="me-ph">' + escapeHtml(s.Title) + '</div>' + sizeChip + '</div>';
             var low = s.MissingCount <= 2;
             var meta = [];
@@ -987,6 +998,9 @@
                 + '</div></div>';
         }).join('');
         g.innerHTML = html;
+        g.querySelectorAll('.me-poster[data-bg]').forEach(function (p) {
+            setBgImage(p, p.getAttribute('data-bg'));
+        });
         g.querySelectorAll('.me-show').forEach(function (el) {
             el.addEventListener('click', function () {
                 var s = state.filtered[parseInt(el.getAttribute('data-i'), 10)];
@@ -1028,13 +1042,9 @@
 
         var posterEl = $('#meDetailPoster');
         var posterUrl = resolveImage(s.PosterUrl, 'Primary');
-        if (posterUrl) {
-            posterEl.style.backgroundImage = 'url("' + posterUrl.replace(/"/g, '%22') + '")';
-            posterEl.innerHTML = '';
-        } else {
-            posterEl.style.backgroundImage = '';
-            posterEl.innerHTML = '<div class="me-ph">' + escapeHtml(s.Title) + '</div>';
-        }
+        posterEl.innerHTML = posterUrl ? '' : '<div class="me-ph">' + escapeHtml(s.Title) + '</div>';
+        if (posterUrl) setBgImage(posterEl, posterUrl);
+        else posterEl.style.backgroundImage = '';
         var titleTag = s.SeriesType === 'anime' ? ' <span class="me-type-pill">Anime</span>' : '';
         $('#meDetailTitle').innerHTML = escapeHtml(s.Title + (s.Year ? ' (' + s.Year + ')' : '')) + titleTag;
 
@@ -1087,7 +1097,7 @@
                 var thumbUrl = resolveImage(ep.ThumbnailUrl, 'Primary');
                 var code = 'S' + String(sn).padStart(2, '0') + 'E' + String(ep.EpisodeNumber).padStart(2, '0');
                 var thumb = thumbUrl
-                    ? '<div class="me-ep-thumb" style="background-image:url(\'' + escapeHtml(thumbUrl) + '\');"></div>'
+                    ? '<div class="me-ep-thumb" data-bg="' + escapeHtml(thumbUrl) + '"></div>'
                     : '<div class="me-ep-thumb"><div class="me-ph">' + code + '</div></div>';
                 var air = ep.AirDateUtc ? new Date(ep.AirDateUtc).toLocaleDateString() : '';
                 var canSearch = searchable && ep.Id > 0;
@@ -1129,6 +1139,9 @@
         }).join('');
 
         $('#meDetailSeasons').innerHTML = seasonHtml;
+        $('#meDetailSeasons').querySelectorAll('.me-ep-thumb[data-bg]').forEach(function (t) {
+            setBgImage(t, t.getAttribute('data-bg'));
+        });
 
         // toggle accordion (clicks on the head, but not on the search button)
         $('#meDetailSeasons').querySelectorAll('.me-season-head').forEach(function (h) {
