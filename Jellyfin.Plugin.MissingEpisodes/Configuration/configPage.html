@@ -126,8 +126,12 @@
 .me-show-meta .t { font-size: .87rem; font-weight: 500; line-height: 1.25; margin: 0 0 .2rem;
   overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2;
   -webkit-box-orient: vertical; min-height: 2.2em; }
-.me-show-meta .s { font-size: .7rem; color: var(--dim); display: flex; gap: .4rem; align-items: center; }
+.me-show-meta .s { font-size: .7rem; color: var(--dim); display: flex; gap: .4rem; align-items: center;
+  flex-wrap: wrap; }
 .me-show-meta .s .dot { width: 3px; height: 3px; border-radius: 50%; background: var(--dim-2); }
+.me-size-chip { position: absolute; bottom: .55rem; left: .55rem; background: rgba(0,0,0,0.72);
+  color: #fff; font-size: .68rem; padding: .18rem .45rem; border-radius: 100px; font-weight: 500;
+  letter-spacing: .2px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
 /* -------- empty/loading states -------- */
 .me-empty { padding: 3.5rem 1.5rem; text-align: center; color: var(--dim);
@@ -207,9 +211,11 @@
 .me-season-head .count { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   color: var(--dim); font-size: .78rem; font-weight: 500; }
 .me-season-head .count .missing { color: var(--danger); margin-left: .5rem; font-weight: 600; }
-.me-season-head .mini-bar { width: 80px; height: 4px; background: var(--panel-2); border-radius: 100px;
-  overflow: hidden; margin-left: .35rem; flex: 0 0 auto; }
-.me-season-head .mini-bar-fill { height: 100%; background: var(--accent); border-radius: inherit; }
+.me-season-head .mini-bar { display: inline-block; width: 80px; height: 5px;
+  background: var(--panel-2); border-radius: 100px; overflow: hidden;
+  margin-left: .35rem; flex: 0 0 auto; vertical-align: middle; }
+.me-season-head .mini-bar-fill { display: block; height: 100%; background: var(--accent);
+  border-radius: inherit; }
 .me-season-head .actions { display: flex; gap: .4rem; flex: 0 0 auto; }
 .me-season-head .actions .me-btn { padding: .32rem .6rem; font-size: .73rem; }
 .me-season-body { display: none; padding: .55rem .75rem .75rem; border-top: 1px solid var(--border);
@@ -416,6 +422,10 @@
     </div>
 
     <div class="me-filters" id="meFilters" style="display:none;">
+      <div class="me-segment" id="meScopeSeg">
+        <button type="button" data-v="active" class="active">Active</button>
+        <button type="button" data-v="ignored">Ignored</button>
+      </div>
       <div class="me-segment" id="meTypeSeg">
         <button type="button" data-v="all" class="active">All</button>
         <button type="button" data-v="standard">TV</button>
@@ -483,7 +493,16 @@
     var PLUGIN_ID = 'b7a24c68-7f3e-4c0a-9a9e-6e2b9e1a4f33';
     var page = document.querySelector('#missingEpisodesPage');
     var state = { result: null, filtered: [], current: null, cfg: null,
-                  sort: 'count', query: '', type: 'all', cfgOpen: false };
+                  sort: 'count', query: '', type: 'all', scope: 'active',
+                  cfgOpen: false, pollId: null };
+
+    function formatBytes(n) {
+        if (!n || n <= 0) return '';
+        var u = ['B','KB','MB','GB','TB'];
+        var i = 0;
+        while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+        return (n >= 10 ? n.toFixed(0) : n.toFixed(1)) + ' ' + u[i];
+    }
 
     var ICON_OK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
     var ICON_ERR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v5M12 16h.01"/></svg>';
@@ -786,7 +805,8 @@
         var r = state.result;
         if (!r || !r.Series) { showEmpty(); return; }
         $('#meEmpty').style.display = 'none';
-        $('#meFilters').style.display = r.Series.length ? 'flex' : 'none';
+        var hasAny = (r.Series && r.Series.length) || (r.IgnoredSeries && r.IgnoredSeries.length);
+        $('#meFilters').style.display = hasAny ? 'flex' : 'none';
         $('#meStatShows').textContent = r.Series.length;
         $('#meStatMissing').textContent = r.TotalMissing;
         $('#meStatSource').textContent = r.Source === 'jellyfin' ? 'Jellyfin' : 'Sonarr';
@@ -798,19 +818,24 @@
         if (!state.result) return;
         var q = state.query.trim().toLowerCase();
         var typeFilter = state.type;
-        var list = state.result.Series.filter(function (s) {
+        var source = state.scope === 'ignored'
+            ? (state.result.IgnoredSeries || [])
+            : state.result.Series;
+        var list = source.filter(function (s) {
             if (typeFilter === 'anime' && s.SeriesType !== 'anime') return false;
             if (typeFilter === 'standard' && s.SeriesType === 'anime') return false;
             return !q || s.Title.toLowerCase().indexOf(q) !== -1;
         });
         if (state.sort === 'title') {
             list.sort(function (a, b) { return a.Title.localeCompare(b.Title); });
-        } else if (state.sort === 'recent') {
+        } else if (state.sort === 'recent' && state.scope === 'active') {
             list.sort(function (a, b) {
-                var am = a.Missing.reduce(function (acc, m) { var t = m.AirDateUtc ? Date.parse(m.AirDateUtc) : 0; return t > acc ? t : acc; }, 0);
-                var bm = b.Missing.reduce(function (acc, m) { var t = m.AirDateUtc ? Date.parse(m.AirDateUtc) : 0; return t > acc ? t : acc; }, 0);
+                var am = (a.Missing || []).reduce(function (acc, m) { var t = m.AirDateUtc ? Date.parse(m.AirDateUtc) : 0; return t > acc ? t : acc; }, 0);
+                var bm = (b.Missing || []).reduce(function (acc, m) { var t = m.AirDateUtc ? Date.parse(m.AirDateUtc) : 0; return t > acc ? t : acc; }, 0);
                 return bm - am;
             });
+        } else if (state.scope === 'ignored') {
+            list.sort(function (a, b) { return a.Title.localeCompare(b.Title); });
         } else {
             list.sort(function (a, b) { return b.MissingCount - a.MissingCount; });
         }
@@ -821,11 +846,15 @@
     function renderGrid() {
         var g = $('#meGrid');
         if (!state.filtered.length) {
+            var msg = state.scope === 'ignored'
+                ? { t: 'Nothing ignored', p: 'Shows you ignore from the detail page will show up here.' }
+                : { t: 'All caught up', p: 'Nothing missing that matches your filters.' };
             g.innerHTML = '<div class="me-empty" style="grid-column:1/-1;">'
                 + '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/></svg>'
-                + '<h3>All caught up</h3><p>Nothing missing that matches your filters.</p></div>';
+                + '<h3>' + msg.t + '</h3><p>' + msg.p + '</p></div>';
             return;
         }
+        var ignoredMode = state.scope === 'ignored';
         var html = state.filtered.map(function (s, idx) {
             var posterUrl = resolveImage(s.PosterUrl, 'Primary');
             var poster = posterUrl
@@ -840,9 +869,16 @@
                 : '&nbsp;';
             var titleTag = s.SeriesType === 'anime'
                 ? '<span class="me-type-pill">Anime</span>' : '';
+            var sizeChip = s.SizeOnDisk > 0
+                ? '<span class="me-size-chip">' + formatBytes(s.SizeOnDisk) + '</span>'
+                : '';
+            var badge = ignoredMode
+                ? '<span class="me-badge" style="background:var(--accent-2);">Ignored</span>'
+                : '<span class="me-badge' + (low ? ' low' : '') + '">' + s.MissingCount + ' missing</span>';
             return '<div class="me-show" data-i="' + idx + '">'
                 + poster
-                + '<span class="me-badge' + (low ? ' low' : '') + '">' + s.MissingCount + ' missing</span>'
+                + badge
+                + sizeChip
                 + '<div class="me-show-meta">'
                 + '<div class="t">' + escapeHtml(s.Title) + titleTag + '</div>'
                 + '<div class="s">' + metaLine + '</div>'
@@ -851,9 +887,23 @@
         g.innerHTML = html;
         g.querySelectorAll('.me-show').forEach(function (el) {
             el.addEventListener('click', function () {
-                openDetail(state.filtered[parseInt(el.getAttribute('data-i'), 10)]);
+                var s = state.filtered[parseInt(el.getAttribute('data-i'), 10)];
+                if (ignoredMode) { unignoreShow(s); }
+                else { openDetail(s); }
             });
         });
+    }
+
+    function unignoreShow(s) {
+        if (!s || !s.TvdbId) return;
+        if (!confirm('Remove "' + s.Title + '" from the ignore list? It\'ll be scanned again next time.')) return;
+        request('Plugins/MissingEpisodes/series/' + s.TvdbId + '/unignore', {
+            type: 'POST', dataType: 'text', data: ''
+        }).then(function () {
+            toast('Unignored · ' + s.Title, 'ok');
+            state.result.IgnoredSeries = (state.result.IgnoredSeries || []).filter(function (x) { return x.TvdbId !== s.TvdbId; });
+            applyFilters();
+        }).catch(function (e) { toast(parseError(e), 'err'); });
     }
 
     // ---------- DETAIL VIEW ----------
@@ -882,6 +932,7 @@
         if (s.Status) meta.push(escapeHtml(s.Status));
         meta.push('<strong style="color:var(--text)">' + s.HaveEpisodes + ' / ' + s.TotalEpisodes + '</strong> episodes');
         meta.push(pct + '% complete');
+        if (s.SizeOnDisk > 0) meta.push('<strong style="color:var(--text)">' + formatBytes(s.SizeOnDisk) + '</strong> on disk');
         $('#meDetailMeta').innerHTML = meta.join(' <span class="dot"></span> ')
             + '<div class="progress-wrap"><div class="me-progress"><div class="me-progress-fill" style="width:' + pct + '%"></div></div></div>'
             + (s.Path ? '<div class="path" title="' + escapeHtml(s.Path) + '">' + escapeHtml(s.Path) + '</div>' : '');
@@ -1016,10 +1067,15 @@
         if (!state.current) return;
         var id = state.current.TvdbId;
         if (!id) { toast('No TVDB id — can\'t ignore', 'err'); return; }
+        var ignored = state.current;
         return request('Plugins/MissingEpisodes/series/' + id + '/ignore', { type: 'POST', dataType: 'text', data: '' })
             .then(function () {
                 toast('Added to ignore list', 'ok');
                 state.result.Series = state.result.Series.filter(function (x) { return x.TvdbId !== id; });
+                state.result.IgnoredSeries = state.result.IgnoredSeries || [];
+                if (!state.result.IgnoredSeries.some(function (x) { return x.TvdbId === id; })) {
+                    state.result.IgnoredSeries.push(ignored);
+                }
                 state.result.TotalMissing = state.result.Series.reduce(function (a, b) { return a + b.MissingCount; }, 0);
                 closeDetail();
                 render();
@@ -1084,6 +1140,13 @@
         if (e.target.tagName === 'BUTTON') {
             state.type = e.target.getAttribute('data-v');
             setSeg('#meTypeSeg', state.type);
+            applyFilters();
+        }
+    });
+    $('#meScopeSeg').addEventListener('click', function (e) {
+        if (e.target.tagName === 'BUTTON') {
+            state.scope = e.target.getAttribute('data-v');
+            setSeg('#meScopeSeg', state.scope);
             applyFilters();
         }
     });

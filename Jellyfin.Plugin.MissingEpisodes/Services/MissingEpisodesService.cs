@@ -158,7 +158,25 @@ public class MissingEpisodesService
         foreach (var s in allSeries)
         {
             Progress.Advance(s.Title);
-            if (ignored.Contains(s.TvdbId)) continue;
+            if (ignored.Contains(s.TvdbId))
+            {
+                result.IgnoredSeries.Add(new ScanSeries
+                {
+                    SonarrId = s.Id,
+                    TvdbId = s.TvdbId,
+                    TmdbId = s.TmdbId,
+                    Title = s.Title,
+                    Year = s.Year,
+                    Network = s.Network,
+                    Status = s.Status,
+                    Path = s.Path,
+                    SeriesType = NormalizeSeriesType(s.SeriesType),
+                    PosterUrl = PickImage(s.Images, "poster"),
+                    SizeOnDisk = s.Statistics?.SizeOnDisk ?? 0,
+                    TotalEpisodes = s.Statistics?.TotalEpisodeCount ?? 0
+                });
+                continue;
+            }
             if (cfg.OnlyMonitored && !s.Monitored) continue;
 
             List<SonarrEpisode> eps;
@@ -222,6 +240,7 @@ public class MissingEpisodesService
                 MissingCount = missing.Count,
                 HaveEpisodes = seasonStats.Values.Sum(x => x.Have),
                 TotalEpisodes = seasonStats.Values.Sum(x => x.Total),
+                SizeOnDisk = s.Statistics?.SizeOnDisk ?? 0,
                 Seasons = seasonStats.OrderBy(kv => kv.Key).Select(kv => new SeasonSummary
                 {
                     SeasonNumber = kv.Key,
@@ -271,7 +290,25 @@ public class MissingEpisodesService
             int.TryParse(tvdbStr, out var tvdbId);
             var tmdbStrSeries = series.GetProviderId(MetadataProvider.Tmdb);
             int.TryParse(tmdbStrSeries, out var tmdbIdSeries);
-            if (tvdbId > 0 && ignoredTvdb.Contains(tvdbId)) continue;
+            if (tvdbId > 0 && ignoredTvdb.Contains(tvdbId))
+            {
+                var jfSeriesIdIg = series.Id.ToString("N");
+                result.IgnoredSeries.Add(new ScanSeries
+                {
+                    SonarrId = 0,
+                    TvdbId = tvdbId,
+                    TmdbId = tmdbIdSeries,
+                    JellyfinSeriesId = jfSeriesIdIg,
+                    Title = series.Name,
+                    Year = series.ProductionYear ?? 0,
+                    Network = series.Studios?.FirstOrDefault(),
+                    Status = series.Status?.ToString(),
+                    Path = series.Path,
+                    SeriesType = InferJellyfinSeriesType(series),
+                    PosterUrl = "jellyfin:" + jfSeriesIdIg
+                });
+                continue;
+            }
 
             var allEps = _libraryManager.GetItemList(new InternalItemsQuery
             {
@@ -643,6 +680,7 @@ public class ScanResult
     public bool SonarrConfigured { get; set; }
     public int TotalMissing { get; set; }
     public List<ScanSeries> Series { get; set; } = new();
+    public List<ScanSeries> IgnoredSeries { get; set; } = new();
 }
 
 public class ScanSeries
@@ -662,6 +700,7 @@ public class ScanSeries
     public int MissingCount { get; set; }
     public int HaveEpisodes { get; set; }
     public int TotalEpisodes { get; set; }
+    public long SizeOnDisk { get; set; }
     public List<SeasonSummary> Seasons { get; set; } = new();
     public List<MissingEpisode> Missing { get; set; } = new();
 }
