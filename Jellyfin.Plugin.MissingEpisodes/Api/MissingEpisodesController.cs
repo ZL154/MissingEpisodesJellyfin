@@ -111,6 +111,12 @@ public class MissingEpisodesController : ControllerBase
     [ProducesResponseType(typeof(ScanSeries), StatusCodes.Status200OK)]
     public async Task<ActionResult> RefreshOne(int tvdbId, System.Threading.CancellationToken ct)
     {
+        // Short-circuit preflight: if a full scan is already running, refuse. Cleaner
+        // than racing on the semaphore and timing out.
+        if (_service.Progress.InProgress)
+        {
+            return Conflict(new { error = "A scan is already running." });
+        }
         try
         {
             var updated = await _service.RefreshSeriesAsync(tvdbId, ct).ConfigureAwait(false);

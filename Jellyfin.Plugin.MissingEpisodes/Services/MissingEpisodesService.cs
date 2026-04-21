@@ -662,9 +662,23 @@ public class MissingEpisodesService
         if (!useJellyfin && !sonarrReady)
             throw new InvalidOperationException("Sonarr must be configured to refresh in Sonarr mode.");
 
-        ScanSeries? updated = useJellyfin
-            ? await RefreshOneFromJellyfinAsync(cfg, tvdbId, sonarrReady, ct).ConfigureAwait(false)
-            : await RefreshOneFromSonarrAsync(cfg, tvdbId, ct).ConfigureAwait(false);
+        // Use the shared progress object so the UI shows the familiar progress strip
+        // even for a single-show refresh. Total = 1.
+        await _scanLock.WaitAsync(ct).ConfigureAwait(false);
+        ScanSeries? updated;
+        Progress.Reset(useJellyfin ? "jellyfin" : "sonarr");
+        Progress.SetTotal(1);
+        try
+        {
+            updated = useJellyfin
+                ? await RefreshOneFromJellyfinAsync(cfg, tvdbId, sonarrReady, ct).ConfigureAwait(false)
+                : await RefreshOneFromSonarrAsync(cfg, tvdbId, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            Progress.Finish();
+            _scanLock.Release();
+        }
 
         if (updated == null) return null;
 
@@ -692,9 +706,10 @@ public class MissingEpisodesService
 
     private async Task<ScanSeries?> RefreshOneFromSonarrAsync(PluginConfiguration cfg, int tvdbId, CancellationToken ct)
     {
-        var all = await _sonarr.GetSeriesAsync(cfg.SonarrUrl, cfg.SonarrApiKey, ct).ConfigureAwait(false);
-        var s = all.FirstOrDefault(x => x.TvdbId == tvdbId);
+        // Use the TVDB-indexed Sonarr endpoint — O(1) on their side, not a full series dump.
+        var s = await _sonarr.GetSeriesByTvdbAsync(cfg.SonarrUrl, cfg.SonarrApiKey, tvdbId, ct).ConfigureAwait(false);
         if (s == null) return null;
+        Progress.Advance(s.Title);
         var eps = await _sonarr.GetEpisodesAsync(cfg.SonarrUrl, cfg.SonarrApiKey, s.Id, ct).ConfigureAwait(false);
         return BuildSeriesFromSonarr(cfg, s, eps);
     }
@@ -763,12 +778,218 @@ public class MissingEpisodesService
 
     private async Task<ScanSeries?> RefreshOneFromJellyfinAsync(PluginConfiguration cfg, int tvdbId, bool sonarrReady, CancellationToken ct)
     {
-        // Jellyfin refresh piggy-backs on a full Jellyfin scan then returns just the matching
-        // entry. Jellyfin queries are in-process and fast; TMDB mode may do a few HTTP calls
-        // but only for this one series if we filter early. Keeping it simple: full scan.
-        var res = await ScanJellyfinOnlyAsync(cfg, ct).ConfigureAwait(false);
-        if (sonarrReady) await EnrichWithSonarrIdsAsync(cfg, res, ct).ConfigureAwait(false);
-        return res.Series.FirstOrDefault(x => x.TvdbId == tvdbId);
+        // Find the one Jellyfin series matching this TVDB id. No full library walk.
+        var seriesItems = _libraryManager.GetItemList(new InternalItemsQuery
+        {
+            IncludeItemTypes = new[] { BaseItemKind.Series },
+            Recursive = true
+        });
+        Series? match = null;
+        foreach (var item in seriesItems)
+        {
+            if (item is not Series s) continue;
+            var tvdbStr = s.GetProviderId(MetadataProvider.Tvdb);
+            if (int.TryParse(tvdbStr, out var id) && id == tvdbId) { match = s; break; }
+        }
+        if (match == null) return null;
+        Progress.Advance(match.Name);
+
+        var mode = (cfg.JellyfinScanMode ?? "virtual").ToLowerInvariant();
+        if (mode != "virtual" && mode != "tmdb" && mode != "gap") mode = "virtual";
+        if (mode == "tmdb" && string.IsNullOrWhiteSpace(cfg.TmdbApiKey))
+            throw new InvalidOperationException("TMDB mode requires a TMDB API key in settings.");
+
+        var updated = await ProcessJellyfinSeriesAsync(cfg, match, mode, ct).ConfigureAwait(false);
+        if (updated != null && sonarrReady)
+        {
+            await EnrichOneFromSonarrAsync(cfg, updated, ct).ConfigureAwait(false);
+        }
+        return updated;
+    }
+
+    // Extracted per-series builder for Jellyfin scans. Used by both the full scan and the
+    // per-show refresh. Returns null for ignored series or ones we can't parse.
+    private async Task<ScanSeries?> ProcessJellyfinSeriesAsync(PluginConfiguration cfg, Series series, string mode, CancellationToken ct)
+    {
+        var ignoredTvdb = new HashSet<int>(cfg.IgnoredSeriesTvdbIds);
+        var tvdbStr = series.GetProviderId(MetadataProvider.Tvdb);
+        int.TryParse(tvdbStr, out var tvdbId);
+        var tmdbStrSeries = series.GetProviderId(MetadataProvider.Tmdb);
+        int.TryParse(tmdbStrSeries, out var tmdbIdSeries);
+        if (tvdbId > 0 && ignoredTvdb.Contains(tvdbId)) return null;
+
+        var now = DateTime.UtcNow;
+        var allEps = _libraryManager.GetItemList(new InternalItemsQuery
+        {
+            IncludeItemTypes = new[] { BaseItemKind.Episode },
+            AncestorIds = new[] { series.Id },
+            Recursive = true
+        });
+
+        var seasonStats = new Dictionary<int, SeasonCount>();
+        var missing = new List<MissingEpisode>();
+        var realBySeason = new Dictionary<int, HashSet<int>>();
+
+        foreach (var e in allEps)
+        {
+            if (e is not Episode episode) continue;
+            var season = episode.ParentIndexNumber;
+            var num = episode.IndexNumber;
+            if (!season.HasValue || !num.HasValue) continue;
+            if (cfg.IgnoreSpecials && season.Value == 0) continue;
+
+            var isVirtual = episode.IsVirtualItem;
+            var air = episode.PremiereDate;
+            var unaired = !air.HasValue || air.Value.ToUniversalTime() > now;
+            if (cfg.IgnoreUnaired && unaired) continue;
+
+            if (!seasonStats.TryGetValue(season.Value, out var stats)) stats = new SeasonCount();
+            var start = num.Value;
+            var end = episode.IndexNumberEnd ?? start;
+            for (var n = start; n <= end; n++)
+            {
+                stats.Total += 1;
+                if (!isVirtual) stats.Have += 1;
+            }
+            seasonStats[season.Value] = stats;
+
+            if (!isVirtual)
+            {
+                if (!realBySeason.TryGetValue(season.Value, out var realSet))
+                {
+                    realSet = new HashSet<int>();
+                    realBySeason[season.Value] = realSet;
+                }
+                for (var n = start; n <= end; n++) realSet.Add(n);
+                continue;
+            }
+
+            if (mode != "virtual") continue;
+            var jfEpIdVirt = episode.Id.ToString("N");
+            missing.Add(new MissingEpisode
+            {
+                Id = 0,
+                SeasonNumber = season.Value,
+                EpisodeNumber = num.Value,
+                Title = episode.Name,
+                AirDateUtc = air?.ToUniversalTime(),
+                Overview = episode.Overview,
+                JellyfinEpisodeId = jfEpIdVirt,
+                ThumbnailUrl = "jellyfin:" + jfEpIdVirt
+            });
+        }
+
+        if (mode == "tmdb" && tmdbIdSeries > 0)
+        {
+            try
+            {
+                await FillMissingFromTmdbAsync(cfg, tmdbIdSeries, realBySeason, missing, seasonStats, now, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "TMDB fetch failed for {Title} ({Tmdb})", series.Name, tmdbIdSeries);
+            }
+        }
+
+        if (mode == "gap")
+        {
+            foreach (var kv in realBySeason)
+            {
+                var sn = kv.Key;
+                var present = kv.Value;
+                if (present.Count == 0) continue;
+                var max = present.Max();
+                for (var n = 1; n <= max; n++)
+                {
+                    if (present.Contains(n)) continue;
+                    if (!seasonStats.TryGetValue(sn, out var stats2)) stats2 = new SeasonCount();
+                    stats2.Total += 1;
+                    seasonStats[sn] = stats2;
+                    missing.Add(new MissingEpisode
+                    {
+                        Id = 0,
+                        SeasonNumber = sn,
+                        EpisodeNumber = n,
+                        Title = null,
+                        Overview = "Inferred from numbering gap in the Jellyfin library.",
+                        JellyfinEpisodeId = null,
+                        ThumbnailUrl = "jellyfin:" + series.Id.ToString("N")
+                    });
+                }
+            }
+        }
+
+        if (missing.Count == 0) return null;
+
+        var jfSeriesId = series.Id.ToString("N");
+        return new ScanSeries
+        {
+            SonarrId = 0,
+            TvdbId = tvdbId,
+            TmdbId = tmdbIdSeries,
+            JellyfinSeriesId = jfSeriesId,
+            Title = series.Name,
+            Year = series.ProductionYear ?? 0,
+            Network = series.Studios?.FirstOrDefault(),
+            Status = series.Status?.ToString(),
+            Path = series.Path,
+            SeriesType = InferJellyfinSeriesType(series),
+            PosterUrl = "jellyfin:" + jfSeriesId,
+            BackdropUrl = "jellyfin-backdrop:" + jfSeriesId,
+            MissingCount = missing.Count,
+            HaveEpisodes = seasonStats.Values.Sum(x => x.Have),
+            TotalEpisodes = seasonStats.Values.Sum(x => x.Total),
+            SizeOnDisk = ComputeDirSize(series.Path),
+            Seasons = seasonStats.OrderBy(kv => kv.Key).Select(kv => new SeasonSummary
+            {
+                SeasonNumber = kv.Key,
+                TotalEpisodes = kv.Value.Total,
+                HaveEpisodes = kv.Value.Have
+            }).ToList(),
+            Missing = missing
+        };
+    }
+
+    // Targeted enrichment for a single ScanSeries — one Sonarr API call per series
+    // instead of fetching the whole library.
+    private async Task EnrichOneFromSonarrAsync(PluginConfiguration cfg, ScanSeries s, CancellationToken ct)
+    {
+        try
+        {
+            SonarrSeries? sonarrS = null;
+            if (s.TvdbId > 0)
+            {
+                sonarrS = await _sonarr.GetSeriesByTvdbAsync(cfg.SonarrUrl, cfg.SonarrApiKey, s.TvdbId, ct)
+                    .ConfigureAwait(false);
+            }
+            if (sonarrS == null) return;
+            s.SonarrId = sonarrS.Id;
+            var sonarrSize = sonarrS.Statistics?.SizeOnDisk ?? 0;
+            if (s.SizeOnDisk == 0 && sonarrSize > 0)
+            {
+                s.SizeOnDisk = sonarrSize;
+                if (!string.IsNullOrEmpty(sonarrS.Path)) s.Path = sonarrS.Path;
+            }
+            if (s.SeriesType == "standard")
+            {
+                var t = NormalizeSeriesType(sonarrS.SeriesType);
+                if (t != "standard") s.SeriesType = t;
+            }
+
+            var eps = await _sonarr.GetEpisodesAsync(cfg.SonarrUrl, cfg.SonarrApiKey, sonarrS.Id, ct)
+                .ConfigureAwait(false);
+            var epIndex = new Dictionary<(int, int), SonarrEpisode>();
+            foreach (var e in eps) epIndex[(e.SeasonNumber, e.EpisodeNumber)] = e;
+            foreach (var m in s.Missing)
+            {
+                if (epIndex.TryGetValue((m.SeasonNumber, m.EpisodeNumber), out var se))
+                    m.Id = se.Id;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Targeted Sonarr enrichment failed for {Title}", s.Title);
+        }
     }
 
     private async Task EnrichWithSonarrIdsAsync(PluginConfiguration cfg, ScanResult result, CancellationToken ct)
@@ -794,11 +1015,16 @@ public class MissingEpisodesService
                 if (s.TvdbId <= 0 && sonarrS.TvdbId > 0) s.TvdbId = sonarrS.TvdbId;
                 // Opportunistic data from Sonarr — fill only when missing so we don't clobber
                 // Jellyfin's own values for the user-picked source.
-                if (s.SizeOnDisk == 0 && sonarrS.Statistics?.SizeOnDisk > 0)
-                    s.SizeOnDisk = sonarrS.Statistics.SizeOnDisk;
-                // Prefer Sonarr's path over Jellyfin's. Jellyfin often caches old paths
-                // even after files move — Sonarr tracks the live location.
-                if (!string.IsNullOrEmpty(sonarrS.Path)) s.Path = sonarrS.Path;
+                // Path + size reconciliation: trust whichever side actually has files.
+                // If Jellyfin's folder is empty/missing (size==0) but Sonarr has content,
+                // Jellyfin's path is stale — swap in Sonarr's path and size.
+                // If Jellyfin has content, keep Jellyfin's numbers (user-sourced truth).
+                var sonarrSize = sonarrS.Statistics?.SizeOnDisk ?? 0;
+                if (s.SizeOnDisk == 0 && sonarrSize > 0)
+                {
+                    s.SizeOnDisk = sonarrSize;
+                    if (!string.IsNullOrEmpty(sonarrS.Path)) s.Path = sonarrS.Path;
+                }
                 // If Sonarr knows the series as anime but Jellyfin didn't tag it, use Sonarr's type.
                 if (s.SeriesType == "standard")
                 {

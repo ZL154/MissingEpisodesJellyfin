@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -63,6 +64,14 @@ public class SonarrClient
         using var client = CreateClient(baseUrl, apiKey);
         var result = await client.GetFromJsonAsync<List<SonarrSeries>>("api/v3/series", JsonOptions, ct).ConfigureAwait(false);
         return result ?? new List<SonarrSeries>();
+    }
+
+    public async Task<SonarrSeries?> GetSeriesByTvdbAsync(string baseUrl, string apiKey, int tvdbId, CancellationToken ct = default)
+    {
+        using var client = CreateClient(baseUrl, apiKey);
+        var result = await client.GetFromJsonAsync<List<SonarrSeries>>(
+            $"api/v3/series?tvdbId={tvdbId}", JsonOptions, ct).ConfigureAwait(false);
+        return result?.FirstOrDefault();
     }
 
     public async Task<List<SonarrEpisode>> GetEpisodesAsync(string baseUrl, string apiKey, int seriesId, CancellationToken ct = default)

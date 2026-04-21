@@ -129,9 +129,10 @@
 .me-show-meta .s { font-size: .7rem; color: var(--dim); display: flex; gap: .4rem; align-items: center;
   flex-wrap: wrap; }
 .me-show-meta .s .dot { width: 3px; height: 3px; border-radius: 50%; background: var(--dim-2); }
-.me-size-chip { position: absolute; bottom: .55rem; left: .55rem; background: rgba(0,0,0,0.72);
-  color: #fff; font-size: .68rem; padding: .18rem .45rem; border-radius: 100px; font-weight: 500;
-  letter-spacing: .2px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.me-size-chip { position: absolute; bottom: .5rem; left: .5rem; background: rgba(0,0,0,0.72);
+  color: #fff; font-size: .68rem; padding: .18rem .48rem; border-radius: 100px; font-weight: 500;
+  letter-spacing: .2px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); z-index: 2; }
 
 /* -------- empty/loading states -------- */
 .me-empty { padding: 3.5rem 1.5rem; text-align: center; color: var(--dim);
@@ -953,9 +954,13 @@
         var ignoredMode = state.scope === 'ignored';
         var html = state.filtered.map(function (s, idx) {
             var posterUrl = resolveImage(s.PosterUrl, 'Primary');
+            var sizeChip = s.SizeOnDisk > 0
+                ? '<span class="me-size-chip">' + formatBytes(s.SizeOnDisk) + '</span>'
+                : '';
+            // Chip lives inside the poster so it stops overlapping the meta row below.
             var poster = posterUrl
-                ? '<div class="me-poster" style="background-image:url(\'' + escapeHtml(posterUrl) + '\');"></div>'
-                : '<div class="me-poster"><div class="me-ph">' + escapeHtml(s.Title) + '</div></div>';
+                ? '<div class="me-poster" style="background-image:url(\'' + escapeHtml(posterUrl) + '\');">' + sizeChip + '</div>'
+                : '<div class="me-poster"><div class="me-ph">' + escapeHtml(s.Title) + '</div>' + sizeChip + '</div>';
             var low = s.MissingCount <= 2;
             var meta = [];
             if (s.Year) meta.push(String(s.Year));
@@ -965,16 +970,12 @@
                 : '&nbsp;';
             var titleTag = s.SeriesType === 'anime'
                 ? '<span class="me-type-pill">Anime</span>' : '';
-            var sizeChip = s.SizeOnDisk > 0
-                ? '<span class="me-size-chip">' + formatBytes(s.SizeOnDisk) + '</span>'
-                : '';
             var badge = ignoredMode
                 ? '<span class="me-badge" style="background:var(--accent-2);">Ignored</span>'
                 : '<span class="me-badge' + (low ? ' low' : '') + '">' + s.MissingCount + ' missing</span>';
             return '<div class="me-show" data-i="' + idx + '">'
                 + poster
                 + badge
-                + sizeChip
                 + '<div class="me-show-meta">'
                 + '<div class="t">' + escapeHtml(s.Title) + titleTag + '</div>'
                 + '<div class="s">' + metaLine + '</div>'
@@ -1317,6 +1318,25 @@
         var originalHtml = btn.innerHTML;
         btn.disabled = true;
         btn.innerHTML = '<span class="me-spinner"></span> Rescanning';
+
+        // Show the same progress strip that full scans use, pre-seeded for this show.
+        var src = (state.result && state.result.Source) || 'sonarr';
+        showScanStrip(true, src);
+        $('#meScanCur').textContent = 'Rescanning ' + state.current.Title;
+        $('#meScanCount').textContent = '0 / 1';
+        $('#meScanFill').classList.remove('indeterminate');
+        $('#meScanFill').style.width = '0%';
+        var pollId = setInterval(function () {
+            request('Plugins/MissingEpisodes/progress').then(function (p) {
+                if (!p || !p.InProgress) return;
+                var total = p.Total || 1;
+                var cur = p.Current || 0;
+                $('#meScanCount').textContent = cur + ' / ' + total;
+                if (p.CurrentTitle) $('#meScanCur').textContent = 'Rescanning ' + p.CurrentTitle;
+                $('#meScanFill').style.width = Math.min(100, Math.round(100 * cur / total)) + '%';
+            }).catch(function () {});
+        }, 500);
+
         request('Plugins/MissingEpisodes/series/' + id + '/refresh', { type: 'POST', data: '{}' })
             .then(function (updated) {
                 if (!updated) {
@@ -1346,6 +1366,8 @@
             })
             .catch(function (err) { toast(parseError(err), 'err'); })
             .finally(function () {
+                clearInterval(pollId);
+                showScanStrip(false);
                 btn.disabled = false;
                 btn.innerHTML = originalHtml;
             });
