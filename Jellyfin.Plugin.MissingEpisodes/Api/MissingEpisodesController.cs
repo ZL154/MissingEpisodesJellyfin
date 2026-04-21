@@ -51,27 +51,44 @@ public class MissingEpisodesController : ControllerBase
 
     public record ScanRequest(string? Source);
 
+    // Fire-and-forget: validates config synchronously so the user gets errors
+    // (bad creds, wrong source) immediately, then starts the scan on a background
+    // task. The UI polls /progress while it runs and /last when done. Navigating
+    // away from the plugin page no longer aborts the scan.
     [HttpPost("scan")]
-    [ProducesResponseType(typeof(ScanResult), StatusCodes.Status200OK)]
-    public async Task<ActionResult> Scan([FromBody] ScanRequest? req, CancellationToken ct)
+    [ProducesResponseType(typeof(object), StatusCodes.Status202Accepted)]
+    public ActionResult Scan([FromBody] ScanRequest? req)
     {
-        try
+        if (_service.Progress.InProgress)
         {
-            var result = await _service.ScanAsync(req?.Source, ct).ConfigureAwait(false);
-            return Ok(result);
+            return Accepted(new { running = true, note = "Scan already in progress." });
         }
-        catch (System.InvalidOperationException ex)
+
+        // Fail fast on obvious misconfigurations so the user sees the error in the
+        // scan button's response, not only by polling progress.
+        var cfg = Plugin.Instance?.Configuration;
+        if (cfg == null) return StatusCode(500, new { error = "Plugin not initialized." });
+        var sourceCheck = string.IsNullOrWhiteSpace(req?.Source) ? cfg.ScanSource : req!.Source;
+        var useJellyfin = string.Equals(sourceCheck, "jellyfin", System.StringComparison.OrdinalIgnoreCase);
+        if (!useJellyfin && !MissingEpisodesService.IsSonarrConfigured(cfg))
         {
-            return BadRequest(new { error = ex.Message });
+            return BadRequest(new { error = "Sonarr scans need a URL and API key. Switch to Jellyfin or fill these in." });
         }
-        catch (System.Net.Http.HttpRequestException ex)
+        if (useJellyfin && string.Equals(cfg.JellyfinScanMode, "tmdb", System.StringComparison.OrdinalIgnoreCase)
+            && string.IsNullOrWhiteSpace(cfg.TmdbApiKey))
         {
-            return StatusCode(502, new { error = "Sonarr unreachable: " + ex.Message });
+            return BadRequest(new { error = "TMDB mode requires a TMDB API key in settings." });
         }
-        catch (System.Exception ex)
+
+        _ = System.Threading.Tasks.Task.Run(async () =>
         {
-            return StatusCode(500, new { error = ex.Message });
-        }
+            try { await _service.ScanAsync(req?.Source, System.Threading.CancellationToken.None).ConfigureAwait(false); }
+            catch (System.Exception ex)
+            {
+                _service.Progress.LastError = ex.Message;
+            }
+        });
+        return Accepted(new { started = true });
     }
 
     [HttpGet("progress")]

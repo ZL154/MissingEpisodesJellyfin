@@ -654,8 +654,9 @@
         }
     }
 
+    // Scan runs on the server and outlives this page. We just kick it off,
+    // then poll progress and refresh results when it finishes.
     function scan() {
-        // Use whichever source is currently selected in the UI — the server will persist it.
         var src = getSeg('#meSourceSeg') || (state.cfg && state.cfg.ScanSource) || 'sonarr';
         var sonarrReady = !!(state.cfg && state.cfg.SonarrUrl && state.cfg.SonarrApiKey);
         if (src !== 'jellyfin' && !sonarrReady) {
@@ -664,32 +665,67 @@
             $('#meCfgToggle').classList.add('me-pulse-soft');
             return Promise.resolve();
         }
-        var btn = $('#meScanBtn');
-        btn.disabled = true;
-        btn.innerHTML = '<span class="me-spinner"></span> Scanning';
-        $('#meEmpty').style.display = 'none';
-        showScanStrip(true, src);
-        showSkeleton(true);
-
-        var pollId = startProgressPoll();
-
         return request('Plugins/MissingEpisodes/scan', {
             type: 'POST',
             data: JSON.stringify({ source: src })
         })
-            .then(function (r) {
-                state.result = r;
-                render();
-                toast('Scan complete · ' + r.TotalMissing + ' missing', 'ok');
+            .then(function () {
+                toast('Scan started · runs in background', 'ok');
+                beginScanTracking(src);
             })
-            .catch(function (e) { toast(parseError(e), 'err'); render(); })
-            .finally(function () {
-                clearInterval(pollId);
-                showScanStrip(false);
-                btn.disabled = false;
-                btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg> Scan now';
-                showSkeleton(false);
-            });
+            .catch(function (e) { toast(parseError(e), 'err'); });
+    }
+
+    function beginScanTracking(src) {
+        var btn = $('#meScanBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="me-spinner"></span> Scanning';
+        showScanStrip(true, src || 'sonarr');
+        $('#meEmpty').style.display = 'none';
+        showSkeleton(true);
+
+        if (state.pollId) clearInterval(state.pollId);
+        state.pollId = setInterval(pollProgressTick, 700);
+        // Fire one immediate tick so the UI doesn't sit empty for 700ms.
+        pollProgressTick();
+    }
+
+    function endScanTracking() {
+        if (state.pollId) { clearInterval(state.pollId); state.pollId = null; }
+        var btn = $('#meScanBtn');
+        btn.disabled = false;
+        btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg> Scan now';
+        showScanStrip(false);
+        showSkeleton(false);
+    }
+
+    function pollProgressTick() {
+        return request('Plugins/MissingEpisodes/progress').then(function (p) {
+            if (!p) return;
+            if (p.InProgress) {
+                $('#meScanSource').textContent = p.Source === 'jellyfin' ? 'Jellyfin' : 'Sonarr';
+                var total = p.Total || 0;
+                var cur = p.Current || 0;
+                $('#meScanCount').textContent = cur + ' / ' + (total || '—');
+                $('#meScanCur').textContent = p.CurrentTitle || 'Preparing…';
+                var fill = $('#meScanFill');
+                if (total > 0) {
+                    fill.classList.remove('indeterminate');
+                    fill.style.width = Math.min(100, Math.round(100 * cur / total)) + '%';
+                }
+            } else {
+                // Scan finished — pull the result and show a toast.
+                endScanTracking();
+                if (p.LastError) {
+                    toast(p.LastError, 'err');
+                }
+                loadLast().then(function () {
+                    if (!p.LastError && state.result) {
+                        toast('Scan complete · ' + state.result.TotalMissing + ' missing', 'ok');
+                    }
+                });
+            }
+        }).catch(function () { /* silent */ });
     }
 
     function showScanStrip(on, src) {
@@ -706,22 +742,14 @@
         }
     }
 
-    function startProgressPoll() {
-        return setInterval(function () {
-            request('Plugins/MissingEpisodes/progress').then(function (p) {
-                if (!p || !p.InProgress) return;
-                $('#meScanSource').textContent = p.Source === 'jellyfin' ? 'Jellyfin' : 'Sonarr';
-                var total = p.Total || 0;
-                var cur = p.Current || 0;
-                $('#meScanCount').textContent = cur + ' / ' + (total || '—');
-                $('#meScanCur').textContent = p.CurrentTitle || 'Preparing…';
-                var fill = $('#meScanFill');
-                if (total > 0) {
-                    fill.classList.remove('indeterminate');
-                    fill.style.width = Math.min(100, Math.round(100 * cur / total)) + '%';
-                }
-            }).catch(function () { /* silent */ });
-        }, 600);
+    // Called on page load. If a scan is already running server-side, seamlessly
+    // show the progress strip and start polling.
+    function resumeScanIfRunning() {
+        return request('Plugins/MissingEpisodes/progress').then(function (p) {
+            if (p && p.InProgress) {
+                beginScanTracking(p.Source);
+            }
+        }).catch(function () { /* silent */ });
     }
 
     function showSkeleton(on) {
@@ -999,8 +1027,8 @@
     }
 
     // Events
-    page.addEventListener('viewshow', function () { loadConfig().then(loadLast); });
-    page.addEventListener('pageshow', function () { loadConfig().then(loadLast); });
+    page.addEventListener('viewshow', function () { loadConfig().then(loadLast).then(resumeScanIfRunning); });
+    page.addEventListener('pageshow', function () { loadConfig().then(loadLast).then(resumeScanIfRunning); });
 
     $('#meCfgToggle').addEventListener('click', function () { openCfg(); });
     $('#meTestBtn').addEventListener('click', testConnection);
@@ -1087,7 +1115,7 @@
         if (e.key === 'Escape' && $('#meDetail').classList.contains('open')) closeDetail();
     });
 
-    loadConfig().then(loadLast);
+    loadConfig().then(loadLast).then(resumeScanIfRunning);
 })();
 </script>
 

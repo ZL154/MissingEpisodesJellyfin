@@ -10,7 +10,9 @@ using Jellyfin.Plugin.MissingEpisodes.Tmdb;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.Session;
 using MediaBrowser.Model.Entities;
+using MediaBrowser.Model.Session;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.MissingEpisodes.Services;
@@ -20,17 +22,24 @@ public class MissingEpisodesService
     private readonly SonarrClient _sonarr;
     private readonly TmdbClient _tmdb;
     private readonly ILibraryManager _libraryManager;
+    private readonly ISessionManager _sessionManager;
     private readonly ILogger<MissingEpisodesService> _logger;
 
     private readonly SemaphoreSlim _scanLock = new(1, 1);
     private ScanResult? _lastResult;
     public ScanProgress Progress { get; } = new();
 
-    public MissingEpisodesService(SonarrClient sonarr, TmdbClient tmdb, ILibraryManager libraryManager, ILogger<MissingEpisodesService> logger)
+    public MissingEpisodesService(
+        SonarrClient sonarr,
+        TmdbClient tmdb,
+        ILibraryManager libraryManager,
+        ISessionManager sessionManager,
+        ILogger<MissingEpisodesService> logger)
     {
         _sonarr = sonarr;
         _tmdb = tmdb;
         _libraryManager = libraryManager;
+        _sessionManager = sessionManager;
         _logger = logger;
     }
 
@@ -92,12 +101,41 @@ public class MissingEpisodesService
             _lastResult = result;
             cfg.LastScanIso = result.ScannedAtUtc.ToString("o");
             Plugin.Instance?.SaveConfiguration();
+            _ = NotifyAdminsAsync(result);
             return result;
         }
         finally
         {
             Progress.Finish();
             _scanLock.Release();
+        }
+    }
+
+    private async Task NotifyAdminsAsync(ScanResult result)
+    {
+        try
+        {
+            var header = "Missing Episodes";
+            var text = result.TotalMissing == 0
+                ? "Scan complete. Nothing missing."
+                : $"Scan complete — {result.TotalMissing} missing across {result.Series.Count} show" +
+                  (result.Series.Count == 1 ? string.Empty : "s");
+            foreach (var session in _sessionManager.Sessions)
+            {
+                try
+                {
+                    await _sessionManager.SendMessageCommand(
+                        session.Id,
+                        session.Id,
+                        new MessageCommand { Header = header, Text = text, TimeoutMs = 8000 },
+                        CancellationToken.None).ConfigureAwait(false);
+                }
+                catch { /* per-session failures are fine */ }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Sending MissingEpisodes toast failed");
         }
     }
 
@@ -171,6 +209,7 @@ public class MissingEpisodesService
             {
                 SonarrId = s.Id,
                 TvdbId = s.TvdbId,
+                TmdbId = s.TmdbId,
                 JellyfinSeriesId = jfId,
                 Title = s.Title,
                 Year = s.Year,
@@ -230,6 +269,8 @@ public class MissingEpisodesService
 
             var tvdbStr = series.GetProviderId(MetadataProvider.Tvdb);
             int.TryParse(tvdbStr, out var tvdbId);
+            var tmdbStrSeries = series.GetProviderId(MetadataProvider.Tmdb);
+            int.TryParse(tmdbStrSeries, out var tmdbIdSeries);
             if (tvdbId > 0 && ignoredTvdb.Contains(tvdbId)) continue;
 
             var allEps = _libraryManager.GetItemList(new InternalItemsQuery
@@ -298,21 +339,16 @@ public class MissingEpisodesService
             }
 
             // If mode is TMDB, fetch per-series from TMDB (only needs a TMDB id).
-            if (mode == "tmdb")
+            if (mode == "tmdb" && tmdbIdSeries > 0)
             {
-                var tmdbStr = series.GetProviderId(MetadataProvider.Tmdb);
-                int.TryParse(tmdbStr, out var tmdbId);
-                if (tmdbId > 0)
+                try
                 {
-                    try
-                    {
-                        await FillMissingFromTmdbAsync(
-                            cfg, tmdbId, realBySeason, missing, seasonStats, now, ct).ConfigureAwait(false);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "TMDB fetch failed for {Title} ({Tmdb})", series.Name, tmdbId);
-                    }
+                    await FillMissingFromTmdbAsync(
+                        cfg, tmdbIdSeries, realBySeason, missing, seasonStats, now, ct).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "TMDB fetch failed for {Title} ({Tmdb})", series.Name, tmdbIdSeries);
                 }
             }
 
@@ -353,6 +389,7 @@ public class MissingEpisodesService
             {
                 SonarrId = 0,
                 TvdbId = tvdbId,
+                TmdbId = tmdbIdSeries,
                 JellyfinSeriesId = jfSeriesId,
                 Title = series.Name,
                 Year = series.ProductionYear ?? 0,
@@ -454,15 +491,22 @@ public class MissingEpisodesService
         try
         {
             var sonarrSeries = await _sonarr.GetSeriesAsync(cfg.SonarrUrl, cfg.SonarrApiKey, ct).ConfigureAwait(false);
-            var byTvdb = sonarrSeries
-                .Where(x => x.TvdbId > 0)
-                .GroupBy(x => x.TvdbId)
-                .ToDictionary(g => g.Key, g => g.First());
+            var byTvdb = new Dictionary<int, SonarrSeries>();
+            var byTmdb = new Dictionary<int, SonarrSeries>();
+            foreach (var x in sonarrSeries)
+            {
+                if (x.TvdbId > 0) byTvdb[x.TvdbId] = x;
+                if (x.TmdbId > 0) byTmdb[x.TmdbId] = x;
+            }
 
             foreach (var s in result.Series)
             {
-                if (s.TvdbId <= 0 || !byTvdb.TryGetValue(s.TvdbId, out var sonarrS)) continue;
+                SonarrSeries? sonarrS = null;
+                if (s.TvdbId > 0) byTvdb.TryGetValue(s.TvdbId, out sonarrS);
+                if (sonarrS == null && s.TmdbId > 0) byTmdb.TryGetValue(s.TmdbId, out sonarrS);
+                if (sonarrS == null) continue;
                 s.SonarrId = sonarrS.Id;
+                if (s.TvdbId <= 0 && sonarrS.TvdbId > 0) s.TvdbId = sonarrS.TvdbId;
                 // If Sonarr knows the series as anime but Jellyfin didn't tag it, use Sonarr's type.
                 if (s.SeriesType == "standard")
                 {
@@ -605,6 +649,7 @@ public class ScanSeries
 {
     public int SonarrId { get; set; }
     public int TvdbId { get; set; }
+    public int TmdbId { get; set; }
     public string? JellyfinSeriesId { get; set; }
     public string Title { get; set; } = string.Empty;
     public int Year { get; set; }
@@ -655,6 +700,8 @@ public class ScanProgress
     public string? CurrentTitle { get; set; }
     public string? Source { get; set; }
     public long StartedAtMs { get; set; }
+    public long CompletedAtMs { get; set; }
+    public string? LastError { get; set; }
 
     public void Reset(string source)
     {
@@ -664,6 +711,8 @@ public class ScanProgress
         CurrentTitle = null;
         Source = source;
         StartedAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        CompletedAtMs = 0;
+        LastError = null;
     }
 
     public void SetTotal(int total) { Total = total; }
@@ -678,5 +727,6 @@ public class ScanProgress
     {
         InProgress = false;
         CurrentTitle = null;
+        CompletedAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
     }
 }

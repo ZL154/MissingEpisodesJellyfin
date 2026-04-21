@@ -28,6 +28,17 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     {
         return new[]
         {
+            // Admin sidebar entry. Same HTML file as the config page — the page
+            // itself is built to work either way.
+            new PluginPageInfo
+            {
+                Name = "missingepisodes",
+                EmbeddedResourcePath = "Jellyfin.Plugin.MissingEpisodes.Configuration.configPage.html",
+                EnableInMainMenu = true,
+                DisplayName = "Missing Episodes",
+                MenuSection = "admin",
+                MenuIcon = "event_busy"
+            },
             new PluginPageInfo
             {
                 Name = "missingepisodesconfigpage",
