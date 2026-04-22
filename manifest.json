@@ -9,6 +9,14 @@
     "imageUrl": null,
     "versions": [
       {
+        "version": "1.0.7.0",
+        "changelog": "- Accuracy: when 'Only monitored' is on, TMDB mode used to count every TMDB-listed episode as expected even if Sonarr had it unmonitored. Now drops unmonitored entries from the missing list during Sonarr enrichment, trimming 'phantom missing' episodes the user never wanted tracked.\n- UI: the Jellyfin method explainer now mentions when Sonarr enrichment is active — surfaces the hasFile fallback so it's not invisible magic.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/ZL154/MissingEpisodesJellyfin/releases/download/v1.0.7/MissingEpisodes_1.0.7.0.zip",
+        "checksum": "9cd5a2be8643e17b18517fc5b84e2522",
+        "timestamp": "2026-04-22T16:00:00Z"
+      },
+      {
         "version": "1.0.6.0",
         "changelog": "Fix scattered-folder case (TMNT-style): files exist on disk under Sonarr-managed per-season folders that neither Jellyfin's path nor Sonarr's series.Path cover. Enrichment now uses Sonarr's per-episode hasFile flag as ground truth — any missing entry Sonarr knows is already on disk gets dropped, season Have bumps, and series with everything now present fall out of the missing list automatically.",
         "targetAbi": "10.11.0.0",

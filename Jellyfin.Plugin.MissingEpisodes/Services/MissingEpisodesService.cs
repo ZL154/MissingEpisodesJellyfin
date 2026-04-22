@@ -945,25 +945,36 @@ public class MissingEpisodesService
         };
     }
 
-    // Sonarr knows, for every episode it tracks, whether the file is actually
-    // downloaded (hasFile). That's ground truth regardless of where on disk the
-    // file lives — which matters for libraries where Sonarr has imported
-    // episodes into scattered folders that neither Jellyfin's path nor Sonarr's
-    // canonical series.Path cover (common with AI-upscale / per-season releases).
-    //
-    // Apply this by: setting Sonarr Id on existing missing entries AND dropping
-    // any entries Sonarr marks hasFile, bumping Have + updating season counts.
-    private static void ApplySonarrHasFile(ScanSeries s, List<SonarrEpisode> eps)
+    // Sonarr knows two things per episode that are useful for trimming the
+    // missing list:
+    //   1. hasFile — whether the file is downloaded. Ground truth regardless of
+    //      which folder it lives in (handles scattered-folder layouts).
+    //   2. monitored — whether the user wants Sonarr to track it. When the
+    //      'Only monitored' toggle is on in the plugin, unmonitored-in-Sonarr
+    //      episodes shouldn't count as missing from the user's perspective.
+    // Also set the Sonarr Id on surviving entries so Search buttons work.
+    private static void ApplySonarrHasFile(ScanSeries s, List<SonarrEpisode> eps, bool onlyMonitored)
     {
         var epIndex = new Dictionary<(int, int), SonarrEpisode>();
         foreach (var e in eps) epIndex[(e.SeasonNumber, e.EpisodeNumber)] = e;
 
         var toRemove = new List<MissingEpisode>();
+        var countedAsHave = new HashSet<MissingEpisode>();
         foreach (var m in s.Missing)
         {
             if (!epIndex.TryGetValue((m.SeasonNumber, m.EpisodeNumber), out var se)) continue;
             if (se.Id > 0) m.Id = se.Id;
-            if (se.HasFile) toRemove.Add(m);
+            if (se.HasFile)
+            {
+                toRemove.Add(m);
+                countedAsHave.Add(m);
+            }
+            else if (onlyMonitored && !se.Monitored)
+            {
+                // Not downloaded, but the user has told Sonarr not to care about
+                // this episode — drop from missing without bumping Have.
+                toRemove.Add(m);
+            }
         }
         if (toRemove.Count == 0) return;
 
@@ -972,17 +983,25 @@ public class MissingEpisodesService
         foreach (var m in toRemove)
         {
             var summary = s.Seasons.FirstOrDefault(x => x.SeasonNumber == m.SeasonNumber);
-            if (summary != null) summary.HaveEpisodes += 1;
-            else s.Seasons.Add(new SeasonSummary
+            if (countedAsHave.Contains(m))
             {
-                SeasonNumber = m.SeasonNumber,
-                HaveEpisodes = 1,
-                TotalEpisodes = 1
-            });
+                if (summary != null) summary.HaveEpisodes += 1;
+                else s.Seasons.Add(new SeasonSummary
+                {
+                    SeasonNumber = m.SeasonNumber,
+                    HaveEpisodes = 1,
+                    TotalEpisodes = 1
+                });
+            }
+            else
+            {
+                // Unmonitored → drop from the show's Total so the completion
+                // percentage reflects what the user actually cares about.
+                if (summary != null && summary.TotalEpisodes > 0) summary.TotalEpisodes -= 1;
+            }
         }
         s.MissingCount = s.Missing.Count;
         s.HaveEpisodes = s.Seasons.Sum(x => x.HaveEpisodes);
-        // Total should never be less than Have.
         foreach (var ss in s.Seasons)
         {
             if (ss.TotalEpisodes < ss.HaveEpisodes) ss.TotalEpisodes = ss.HaveEpisodes;
@@ -1018,7 +1037,7 @@ public class MissingEpisodesService
 
             var eps = await _sonarr.GetEpisodesAsync(cfg.SonarrUrl, cfg.SonarrApiKey, sonarrS.Id, ct)
                 .ConfigureAwait(false);
-            ApplySonarrHasFile(s, eps);
+            ApplySonarrHasFile(s, eps, cfg.OnlyMonitored);
         }
         catch (Exception ex)
         {
@@ -1075,7 +1094,7 @@ public class MissingEpisodesService
                 {
                     continue;
                 }
-                ApplySonarrHasFile(s, eps);
+                ApplySonarrHasFile(s, eps, cfg.OnlyMonitored);
             }
         }
         catch (Exception ex)
