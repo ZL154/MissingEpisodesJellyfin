@@ -184,10 +184,14 @@ public class MissingEpisodesService
                 result = await ScanJellyfinOnlyAsync(cfg, ct).ConfigureAwait(false);
                 if (sonarrReady)
                 {
-                    // Only enrich with Sonarr episode IDs (for searching). Don't replace Jellyfin's
-                    // own thumbnails with Sonarr screenshots — when the user picks "Jellyfin", the
-                    // UI should show Jellyfin's data.
+                    // Enrichment does two jobs: assign Sonarr episode IDs (for Search
+                    // buttons) AND apply Sonarr's hasFile as ground truth for presence
+                    // (catches scattered-folder cases where Jellyfin's path + Sonarr's
+                    // canonical path can't see the actual downloaded files).
                     await EnrichWithSonarrIdsAsync(cfg, result, ct).ConfigureAwait(false);
+                    // Some series may now be fully satisfied — drop them from the list.
+                    result.Series.RemoveAll(s => s.Missing.Count == 0);
+                    result.TotalMissing = result.Series.Sum(s => s.MissingCount);
                 }
             }
             else
@@ -941,6 +945,51 @@ public class MissingEpisodesService
         };
     }
 
+    // Sonarr knows, for every episode it tracks, whether the file is actually
+    // downloaded (hasFile). That's ground truth regardless of where on disk the
+    // file lives — which matters for libraries where Sonarr has imported
+    // episodes into scattered folders that neither Jellyfin's path nor Sonarr's
+    // canonical series.Path cover (common with AI-upscale / per-season releases).
+    //
+    // Apply this by: setting Sonarr Id on existing missing entries AND dropping
+    // any entries Sonarr marks hasFile, bumping Have + updating season counts.
+    private static void ApplySonarrHasFile(ScanSeries s, List<SonarrEpisode> eps)
+    {
+        var epIndex = new Dictionary<(int, int), SonarrEpisode>();
+        foreach (var e in eps) epIndex[(e.SeasonNumber, e.EpisodeNumber)] = e;
+
+        var toRemove = new List<MissingEpisode>();
+        foreach (var m in s.Missing)
+        {
+            if (!epIndex.TryGetValue((m.SeasonNumber, m.EpisodeNumber), out var se)) continue;
+            if (se.Id > 0) m.Id = se.Id;
+            if (se.HasFile) toRemove.Add(m);
+        }
+        if (toRemove.Count == 0) return;
+
+        foreach (var m in toRemove) s.Missing.Remove(m);
+
+        foreach (var m in toRemove)
+        {
+            var summary = s.Seasons.FirstOrDefault(x => x.SeasonNumber == m.SeasonNumber);
+            if (summary != null) summary.HaveEpisodes += 1;
+            else s.Seasons.Add(new SeasonSummary
+            {
+                SeasonNumber = m.SeasonNumber,
+                HaveEpisodes = 1,
+                TotalEpisodes = 1
+            });
+        }
+        s.MissingCount = s.Missing.Count;
+        s.HaveEpisodes = s.Seasons.Sum(x => x.HaveEpisodes);
+        // Total should never be less than Have.
+        foreach (var ss in s.Seasons)
+        {
+            if (ss.TotalEpisodes < ss.HaveEpisodes) ss.TotalEpisodes = ss.HaveEpisodes;
+        }
+        s.TotalEpisodes = s.Seasons.Sum(x => x.TotalEpisodes);
+    }
+
     // Targeted enrichment for a single ScanSeries — one Sonarr API call per series
     // instead of fetching the whole library.
     private async Task EnrichOneFromSonarrAsync(PluginConfiguration cfg, ScanSeries s, CancellationToken ct)
@@ -969,13 +1018,7 @@ public class MissingEpisodesService
 
             var eps = await _sonarr.GetEpisodesAsync(cfg.SonarrUrl, cfg.SonarrApiKey, sonarrS.Id, ct)
                 .ConfigureAwait(false);
-            var epIndex = new Dictionary<(int, int), SonarrEpisode>();
-            foreach (var e in eps) epIndex[(e.SeasonNumber, e.EpisodeNumber)] = e;
-            foreach (var m in s.Missing)
-            {
-                if (epIndex.TryGetValue((m.SeasonNumber, m.EpisodeNumber), out var se))
-                    m.Id = se.Id;
-            }
+            ApplySonarrHasFile(s, eps);
         }
         catch (Exception ex)
         {
@@ -1032,17 +1075,7 @@ public class MissingEpisodesService
                 {
                     continue;
                 }
-                var epIndex = new Dictionary<(int, int), SonarrEpisode>();
-                foreach (var e in eps) epIndex[(e.SeasonNumber, e.EpisodeNumber)] = e;
-
-                foreach (var m in s.Missing)
-                {
-                    if (epIndex.TryGetValue((m.SeasonNumber, m.EpisodeNumber), out var se))
-                    {
-                        m.Id = se.Id;
-                        // Do NOT replace ThumbnailUrl here — leaving Jellyfin's own thumb intact.
-                    }
-                }
+                ApplySonarrHasFile(s, eps);
             }
         }
         catch (Exception ex)
