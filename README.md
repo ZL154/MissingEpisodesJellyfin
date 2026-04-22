@@ -19,10 +19,11 @@ Scans your **Jellyfin library**, your **Sonarr instance**, or queries **TMDB** w
 ## 📑 Table of contents
 
 - [Features](#-features)
+- [Screenshots](#️-screenshots)
 - [Installation](#️-installation)
 - [Configuration](#-configuration)
 - [How each scan source works](#-how-each-scan-source-works)
-- [Accuracy — filename parsing](#-accuracy--filename-parsing)
+- [Accuracy](#-accuracy)
 - [Sending to Sonarr](#-sending-to-sonarr)
 - [What this plugin stores](#-what-this-plugin-stores)
 - [Security](#-security)
@@ -54,6 +55,58 @@ Scans your **Jellyfin library**, your **Sonarr instance**, or queries **TMDB** w
 - **Storage + path** — GB chip on each card (computed from on-disk size when Jellyfin can read the folder; from Sonarr otherwise). Series path in the detail view. Smart reconciliation: trust whichever side has files.
 - **Sorts** — Most missing / Title / Recent / Size / Progress (least-complete first).
 - **Admin-only API** — every endpoint requires the `RequiresElevation` policy.
+
+---
+
+## 🖼️ Screenshots
+
+### The dashboard
+
+The whole plugin at a glance. Four stat cards at the top (shows with gaps, total missing, source, time since last scan), a collapsible scan-history block right below, the filter toolbar, and a poster grid sorted by most-missing by default. Each card has a red missing-count badge in the top-right corner and a dark monospace size chip in the bottom-left — fits a lot of signal into a small space without looking busy.
+
+![Dashboard — hero, stats, scan history and poster grid](docs/screenshots/overview.png)
+
+### Poster grid
+
+Closer look at the cards. Badges turn orange when the count is ≤2 so you can see at a glance which shows are "nearly done" vs "wildly behind". Anime detection auto-applies a small pill next to the title (sourced from Sonarr's `seriesType` or a Jellyfin genre/tag). Hover lift is subtle and hover-shadow softens, so scanning with your eyes doesn't feel like a slot machine.
+
+![Poster grid with per-show missing badges and GB chips](docs/screenshots/poster-grid.png)
+
+### Toolbar
+
+Three independent filters (scope, type, text) plus five sorts: **Most missing** (default), **Title**, **Recent** (most recently aired missing episode first), **Size** (biggest-on-disk first, good for reclaiming space), and **Progress** (least-complete first, good for binge planning). The **Search all** button on the right hands every currently-visible missing episode — respecting all three filters — off to Sonarr in one batched `EpisodeSearch`, with a confirm dialog so you don't accidentally kick off 4,000 searches.
+
+![Toolbar — scope, type, search, sort, bulk search](docs/screenshots/filters.png)
+
+### Scan history
+
+A rolling log of the last 25 scans — time, source, mode, missing total, show count, duration. Lets you eyeball trends ("did my missing count drop after last week's Sonarr run?") and surface pathological scans (the 440s outlier here is early-days before I put the single-series optimisation in).
+
+![Scan history entries](docs/screenshots/scan-history.png)
+
+### Show detail
+
+Clicking a poster swaps the whole page for a dedicated detail view — no modal, no popup. Header carries the show's poster, missing count pill, network, status, `Have / Total`, completion percentage, on-disk size, and series path (not shown in this crop). Three action buttons: **Search all missing** (batched Sonarr search for just this show), **Rescan this show** (refreshes only this show, runs in ~1s under the same progress strip the full scan uses), and **Ignore this show** (hides it from scans, accessible later from the Ignored tab).
+
+![Detail header — missing count, network, episodes, completion %, size](docs/screenshots/detail-header.png)
+
+Seasons live below the header as an accordion. Each row shows `Have / Total`, the absolute missing count, and a mini progress bar. Seasons with zero gaps don't appear at all. Per-season **Search season** button lets you batch-request just one season without touching the others.
+
+![Season accordion with Have/Total counts](docs/screenshots/detail-seasons.png)
+
+Pop any season open and you get proper episode rows — 16:9 thumbnail (from Sonarr's screenshot images or TMDB `still_path`), season/episode code, title, overview, air date, and a per-episode **Search** button. Queued episodes turn green with a ✓ so you know the click landed. Scroll is contained in the episode list, header stays visible.
+
+![Expanded season with episodes and search buttons](docs/screenshots/detail-episodes.png)
+
+### Settings
+
+The two segmented controls on the left are the core: **Scan source** (Sonarr or Jellyfin) and — only when Jellyfin is selected — **Jellyfin method** (Virtual items / TMDB / Gap detection). Both auto-save on click, no Save button needed. The method explainer changes text based on your picks and adds a note when Sonarr is configured, so there's no silent magic.
+
+![Scan source + Jellyfin method + auto-search interval](docs/screenshots/settings-source.png)
+
+The rest of the settings row. **Auto-send missing episodes to Sonarr** turns on the background worker (scans on `Auto-search every (hours)` interval and dispatches every missing episode automatically). **Only monitored**, **Ignore specials**, and **Ignore unaired** are the three noise-reduction toggles — each does what it says. **Test Sonarr** and **Test TMDB** hit each service's health endpoint and surface the real error if it fails, so you find out you typed the URL wrong before your first scan, not after.
+
+![Toggles and Save row](docs/screenshots/settings-toggles.png)
 
 ---
 
