@@ -2,7 +2,7 @@
   <img src="https://img.shields.io/badge/Jellyfin-10.11%2B-0b0b0b?style=for-the-badge&labelColor=000000&color=2b2b2b" />
   <img src="https://img.shields.io/badge/Type-Plugin-4d9ed1?style=for-the-badge&labelColor=000000&color=4d9ed1" />
   <img src="https://img.shields.io/badge/Integrates-Sonarr%20%7C%20TMDB-0b0b0b?style=for-the-badge&labelColor=000000&color=2b2b2b" />
-  <img src="https://img.shields.io/badge/Version-1.0.3-0b0b0b?style=for-the-badge&labelColor=000000&color=2b2b2b" />
+  <img src="https://img.shields.io/badge/Version-1.0.8-0b0b0b?style=for-the-badge&labelColor=000000&color=2b2b2b" />
   <img src="https://img.shields.io/badge/License-MIT-0b0b0b?style=for-the-badge&labelColor=000000&color=2b2b2b" />
 </p>
 
@@ -12,7 +12,7 @@ Find the gaps in your TV library — and let Sonarr fill them.
 
 Scans your **Jellyfin library**, your **Sonarr instance**, or queries **TMDB** when neither has the data. Shows exactly what's missing per show, per season, per episode, with thumbnails, air dates, storage sizes, paths, and a one-click Search button that hands off to Sonarr.
 
-> **Status:** stable (**v1.0.3**). Works end-to-end on Jellyfin 10.11.x + Sonarr v3. Install via the plugin repository URL below or as a manual DLL drop.
+> **Status:** stable (**v1.0.8**). Works end-to-end on Jellyfin 10.11.x + Sonarr v3. Install via the plugin repository URL below or as a manual DLL drop.
 
 ---
 
@@ -39,7 +39,10 @@ Scans your **Jellyfin library**, your **Sonarr instance**, or queries **TMDB** w
   - **Jellyfin / Virtual items** — use Jellyfin's own missing-episode items (requires *Display missing episodes within seasons* in the library).
   - **Jellyfin / TMDB** — query TMDB for each show's canonical episode list. Works without any Jellyfin library reconfiguration. Needs a free TMDB API key.
   - **Jellyfin / Gap detection** — find numbering holes in what's on disk. No external deps, limited but useful.
-- **Filename parsing safety net** — walks the series folder on disk and parses `S01E05` / `1x05` / multi-ep patterns. Catches episodes that exist on disk but Jellyfin's library never imported — the exact class of bug where a show reads as 0/186 despite 144 GB sitting there.
+- **Accuracy layers** — presence of an episode is derived from three sources, each filling gaps the others miss:
+  1. **Jellyfin library** — non-virtual items the library scan imported.
+  2. **Filename parser** — walks `series.Path` on disk and parses `S01E05` / `1x05` / multi-ep patterns. Catches files Jellyfin never imported (e.g. shows where the library lists 0 episodes despite 144 GB on disk). Falls back to Sonarr's path when Jellyfin's is stale.
+  3. **Sonarr `hasFile`** *(if configured)* — the authoritative per-episode flag. Catches episodes stored in folders neither Jellyfin nor Sonarr's canonical path covers (scattered-release layouts). Also drops unmonitored-in-Sonarr episodes from the missing list when **Only monitored** is on.
 - **One-click Sonarr search** — per episode, per season, per show, or everything currently visible.
 - **Auto-search** (optional) — scan + dispatch to Sonarr on a schedule.
 - **Rescan this show** — targeted refresh from the detail view, no full library scan.
@@ -127,14 +130,27 @@ If Sonarr is configured AND you're running a Jellyfin-source scan, the plugin ma
 
 ---
 
-## 🎯 Accuracy — filename parsing
+## 🎯 Accuracy
 
-Library drift is common. Files can be on disk while Jellyfin's library lists them as missing (stale metadata, failed imports, renamed paths). To avoid false missing counts, every Jellyfin scan **walks the series folder and parses filenames** for patterns like `S01E05`, `s01e05e06`, `1x05`. Any episode coordinate found on disk is counted as present even if Jellyfin hasn't imported it.
+Every Jellyfin-mode scan combines up to three sources of "present" data, fighting library drift and scattered file layouts:
 
-Limitations:
+1. **Jellyfin's library** — non-virtual episode items it's already indexed.
+2. **Filename parser** — walks `series.Path` and extracts coordinates from `S01E05`, `S01E05-E06`, `1x05`, etc. filenames. If Jellyfin's path is stale/empty, the parser retries against **Sonarr's path** (when Sonarr is configured) — Sonarr tracks the live location. Whichever yields more content wins.
+3. **Sonarr `hasFile` enrichment** *(when Sonarr is configured)* — for every entry still in the missing list, the plugin checks Sonarr's per-episode `hasFile` flag. Episodes Sonarr marks as downloaded are dropped from missing regardless of which folder they live in. Catches scattered-release layouts (per-season release folders etc.) that neither path walk covers. When **Only monitored** is on, episodes Sonarr has unmonitored are also dropped (you've told Sonarr not to track them, so they shouldn't inflate your missing count).
 
-- Absolute-numbered anime filenames (e.g. `Gintama - 042`) don't match the regex — those are hard to disambiguate from random three-digit numbers. Re-rename with `S01E42` or use Sonarr source for those shows.
-- A filename has to actually contain the S/E markers. `Pilot.mkv` won't be detected.
+### Pure-Jellyfin mode
+
+If you leave both Sonarr and TMDB blank, accuracy is capped by what Jellyfin's library + the series folder tell us:
+
+- **Virtual items** — needs *Display missing episodes within seasons* enabled in the library and a metadata scan.
+- **Gap detection** — no library settings required, but can't detect missing seasons or episodes past the highest you have.
+
+Either of those works standalone, but for libraries with files scattered across multiple folders you want Sonarr.
+
+### Limitations
+
+- Absolute-numbered anime filenames (e.g. `Gintama - 042`) don't match the `S##E##` regex. Re-rename or use Sonarr source.
+- A filename has to contain S/E markers. `Pilot.mkv` won't be detected.
 
 ---
 
@@ -167,11 +183,14 @@ To wipe: stop Jellyfin, delete the files, restart. Next scan regenerates them. H
 
 ## 🔒 Security
 
-- **Admin-only.** Every API endpoint requires Jellyfin's `RequiresElevation` policy.
-- **No secret logging.** Sonarr and TMDB API keys are passed to outbound HTTP calls only — never written to Jellyfin logs.
-- **No secrets in plugin files.** `last-result.json` and `history.json` contain scan data only. API keys stay in Jellyfin's plugin config (as with any other plugin).
-- **XSS-hardened.** Image URLs from Sonarr / TMDB / Jellyfin are applied via `element.style.backgroundImage` with `JSON.stringify` escaping, not interpolated into inline HTML — can't break out of the `url()` literal even with a hostile response.
-- **No path traversal.** File walks only touch `series.Path` from Jellyfin's library manager; no user-supplied paths.
+- **Admin-only.** Every API endpoint carries `[Authorize(Policy = "RequiresElevation")]`. No anonymous endpoints.
+- **No secret logging.** Sonarr and TMDB API keys are passed to outbound HTTP calls only — never written to Jellyfin logs. Grepped every `_logger.Log*` call to confirm.
+- **No secrets in plugin data files.** `last-result.json` and `history.json` hold scan results only. API keys stay in Jellyfin's plugin config (as with any other plugin).
+- **XSS-hardened.** Image URLs from Sonarr / TMDB / Jellyfin are applied via `element.style.backgroundImage = 'url(' + JSON.stringify(url) + ')'` rather than interpolated into inline HTML — a hostile upstream response can't break out of the `url()` literal.
+- **User-controlled strings escaped.** All series/episode titles, network names, and paths rendered into the UI go through an `escapeHtml` helper before `innerHTML` assignment.
+- **No path traversal.** File walks only touch `series.Path` from Jellyfin's library manager plus (optionally) Sonarr's path for the same series. No user-supplied paths accepted by any endpoint.
+- **Safe logging.** Series titles and paths appear in log messages only at `Debug` level using structured parameters — ASP.NET Core's formatter prevents log injection.
+- **No unbounded scans.** `Progress.InProgress` gates concurrent scans; refresh endpoint returns HTTP 409 while a scan runs.
 
 ---
 

@@ -805,7 +805,7 @@ public class MissingEpisodesService
                 usedPath = sonarrPathFallback;
             }
         }
-        _logger.LogInformation("MissingEpisodes.FileScan {Title} path='{Path}' size={Size} parsed={Parsed}",
+        _logger.LogDebug("MissingEpisodes.FileScan {Title} path='{Path}' size={Size} parsed={Parsed}",
             series.Name, usedPath ?? "<null>", sizeOnDisk, filenameEps.Count);
         foreach (var (s, e) in filenameEps)
         {
@@ -1175,9 +1175,6 @@ public class MissingEpisodesService
     {
         ".mkv", ".mp4", ".avi", ".m4v", ".mov", ".wmv", ".flv", ".webm", ".ts", ".mpg", ".mpeg"
     };
-
-    public static (long size, List<(int season, int episode)> episodes) DebugScanSeriesFolder(string? path)
-        => ScanSeriesFolder(path);
 
     // Walk a series folder once: sum file sizes AND parse episode coordinates from
     // filenames. The parser is the safety net for shows where Jellyfin's library is

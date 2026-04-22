@@ -9,6 +9,14 @@
     "imageUrl": null,
     "versions": [
       {
+        "version": "1.0.8.0",
+        "changelog": "Final security pass + README refresh.\n- Removed the /debug/parse diagnostic endpoint. Served its purpose chasing the Office/TMNT bug; no longer part of the public API surface.\n- Dropped the FileScan log line from Information to Debug. Doesn't leak filesystem paths into the default Jellyfin logs anymore.\n- README updated to document the three-layer accuracy model (Jellyfin / filename parse / Sonarr hasFile), pure-Jellyfin mode tradeoffs, and the full security posture.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/ZL154/MissingEpisodesJellyfin/releases/download/v1.0.8/MissingEpisodes_1.0.8.0.zip",
+        "checksum": "97a5ec96af093f51556daec5dfc6e81f",
+        "timestamp": "2026-04-22T17:00:00Z"
+      },
+      {
         "version": "1.0.7.0",
         "changelog": "- Accuracy: when 'Only monitored' is on, TMDB mode used to count every TMDB-listed episode as expected even if Sonarr had it unmonitored. Now drops unmonitored entries from the missing list during Sonarr enrichment, trimming 'phantom missing' episodes the user never wanted tracked.\n- UI: the Jellyfin method explainer now mentions when Sonarr enrichment is active — surfaces the hasFile fallback so it's not invisible magic.",
         "targetAbi": "10.11.0.0",
