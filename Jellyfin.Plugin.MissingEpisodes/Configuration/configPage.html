@@ -18,6 +18,16 @@
       --border: rgba(255,255,255,0.07); --border-strong: rgba(255,255,255,0.14);
       --text: #ebedf0; --dim: rgba(235,237,240,0.58); --dim-2: rgba(235,237,240,0.35);
       color-scheme: dark; color: var(--text); }
+
+/* -------- v1.1.0: Classic / Revamp segmented toggle (works in both modes) -------- */
+.me-style-toggle { display: inline-flex; padding: 2px; gap: 2px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; }
+.me-style-btn { background: transparent; border: 0; padding: .42rem .85rem; color: var(--dim);
+  border-radius: 6px; font-size: .76rem; font-weight: 600; letter-spacing: .8px;
+  text-transform: uppercase; cursor: pointer; transition: color .14s, background .14s; }
+.me-style-btn:hover { color: var(--text); }
+.me-style-btn[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.me-style-btn:active { transform: translateY(1px); }
 .me * { box-sizing: border-box; }
 .me { display: block; padding: 0 0 4rem; }
 .me a { color: var(--accent); text-decoration: none; }
@@ -336,6 +346,1226 @@
   .me-ep-thumb { flex: 0 0 100px; }
   .me-ep-top .air { margin-left: 0; }
 }
+
+/* ============================================================================
+   v1.1.0 — Editorial Revamp layer
+   --------------------------------------------------------------------------
+   Direction: editorial / database. Where the AchievementBadges Revamp leaned
+   into HUD/cyberpunk vocabulary, this one leans the other way — TV magazine
+   spread + library-catalogue. Same Geist + JetBrains Mono pairing for type
+   continuity, but warmer dark surfaces, no corner brackets, no scanlines.
+
+   Every rule in this layer is gated on:
+     #missingEpisodesPage[data-me-style="revamp"]
+   Classic is fully untouched. Toggling switches by stamping the attribute
+   on the page root.
+   ============================================================================ */
+
+/* --- Tokens (Revamp scope) ---------------------------------------------- */
+#missingEpisodesPage[data-me-style="revamp"] .me {
+    --bg:           oklch(13% 0.008 265);
+    --panel:        oklch(18% 0.012 265);
+    --panel-2:      oklch(22% 0.014 265);
+    --panel-hi:     oklch(26% 0.016 265);
+    --border:       oklch(40% 0.014 265 / 0.42);
+    --border-strong:oklch(52% 0.020 265 / 0.62);
+    --text:         oklch(95% 0 0);
+    --dim:          oklch(76% 0.010 265);
+    --dim-2:        oklch(60% 0.014 265);
+    --accent:       oklch(72% 0.16 270);          /* indigo */
+    --accent-2:     oklch(72% 0.16 152);          /* emerald */
+    --danger:       oklch(70% 0.20 22);
+    --warn:         oklch(80% 0.16 75);
+    --ok:           oklch(72% 0.16 152);
+    --rv-display:   'Geist','Inter','Segoe UI',system-ui,sans-serif;
+    --rv-mono:      'JetBrains Mono','Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+    --rv-fast:      180ms;
+    --rv-ease:      cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* v1.1.2: dropped the decorative orb entirely — it was the source of the
+   horizontal overflow that persisted past v1.1.1. The orb was a stylistic
+   copy-paste from the AchievementBadges Revamp; it doesn't pull enough
+   weight here to justify fighting Jellyfin's layout chain over it.
+   `overflow-x: hidden` left in defensively in case any future absolute-
+   positioned element wanders out of bounds; `hidden` has near-universal
+   browser support where `clip` is newer (2022+). */
+#missingEpisodesPage[data-me-style="revamp"] {
+    overflow-x: hidden;
+    max-width: 100%;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me {
+    font-family: var(--rv-display) !important;
+    max-width: 100%;
+}
+
+/* --- Hero — minimal ribbon (stats panel below carries the visual weight) */
+/* v1.1.7: hero becomes a thin ribbon — section number eyebrow + small
+   title + actions, all in one slim row. The big editorial moment is the
+   stats panel below, where the missing-count becomes a giant numeral. */
+#missingEpisodesPage[data-me-style="revamp"] .me-hero {
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    padding: 16px 0 14px !important;
+    margin-bottom: 0 !important;
+    border-bottom: 1px solid var(--border) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-hero::before {
+    content: "01 / LIBRARY GAPS";
+    display: block;
+    font: 500 10px/1 var(--rv-mono);
+    letter-spacing: 0.24em;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-title .logo {
+    background: var(--panel-2) !important;
+    border: 1px solid var(--border) !important;
+    color: var(--accent) !important;
+    width: 36px !important;
+    height: 36px !important;
+    border-radius: 10px !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-title .logo svg {
+    width: 16px !important;
+    height: 16px !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-title h1 {
+    font-family: var(--rv-display) !important;
+    font-weight: 600 !important;
+    font-size: 20px !important;
+    letter-spacing: -0.005em !important;
+    line-height: 1 !important;
+    color: var(--text) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-title p {
+    display: none !important;
+}
+
+/* --- Stats — TWO-ROW EDITORIAL HEADER ---------------------------------
+   v1.1.7: completely restructure the 4-cell strip. The DANGER stat
+   (3,985 missing episodes) becomes a giant editorial numeral spanning
+   the full top row. The other 3 stats (shows-with-gaps, source, last-scan)
+   sit below as a thin secondary strip. This is the bold change:
+     [ 3,985                                   ]
+     EPISODES MISSING
+     ─────────────────────────────────────────
+     112 SHOWS · JELLYFIN · 11D AGO
+   Markup order is: 1=Shows, 2=Missing, 3=Source, 4=Time.
+   Use grid-template-areas to hoist the danger cell into row 1 even
+   though it's the second child in the DOM. */
+#missingEpisodesPage[data-me-style="revamp"] .me-summary {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr 1fr !important;
+    grid-template-rows: auto auto !important;
+    grid-template-areas:
+        "headline headline headline"
+        "shows source time"  !important;
+    gap: 0 !important;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    margin: 0 0 32px 0 !important;
+    padding: 36px 0 28px !important;
+    border-bottom: 1px solid var(--border) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-stat:nth-child(1) { grid-area: shows; }
+#missingEpisodesPage[data-me-style="revamp"] .me-stat:nth-child(2) { grid-area: headline; }
+#missingEpisodesPage[data-me-style="revamp"] .me-stat:nth-child(3) { grid-area: source; }
+#missingEpisodesPage[data-me-style="revamp"] .me-stat:nth-child(4) { grid-area: time; }
+#missingEpisodesPage[data-me-style="revamp"] .me-stat {
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    position: relative;
+}
+
+/* The headline cell — giant editorial number. Spans full row. */
+#missingEpisodesPage[data-me-style="revamp"] .me-stat.danger {
+    margin-bottom: 24px !important;
+    padding-bottom: 22px !important;
+    border-bottom: 1px solid var(--border) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-stat.danger .v {
+    font-family: var(--rv-display) !important;
+    font-weight: 800 !important;
+    font-size: clamp(72px, 11vw, 144px) !important;
+    letter-spacing: -0.04em !important;
+    line-height: 0.9 !important;
+    color: var(--text) !important;
+    font-variant-numeric: tabular-nums !important;
+    /* The shimmer micro-loop from v1.1.4 still applies via the
+       background-clip: text rule. Override here to use a richer
+       gradient — danger fading into highlight then back. */
+    background: linear-gradient(
+        100deg,
+        oklch(70% 0.20 22) 0%,
+        oklch(70% 0.20 22) 30%,
+        oklch(92% 0.18 35 / 0.95) 50%,
+        oklch(70% 0.20 22) 70%,
+        oklch(70% 0.20 22) 100%
+    ) !important;
+    background-size: 220% 100% !important;
+    -webkit-background-clip: text !important;
+            background-clip: text !important;
+    -webkit-text-fill-color: transparent !important;
+            color: transparent !important;
+    animation: me-rv-stat-shimmer 4s cubic-bezier(0.4, 0, 0.2, 1) infinite !important;
+    display: block;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-stat.danger .k {
+    font: 700 11px/1 var(--rv-mono) !important;
+    letter-spacing: 0.24em !important;
+    text-transform: uppercase !important;
+    color: oklch(70% 0.20 22) !important;
+    margin-top: 14px !important;
+    display: block !important;
+}
+
+/* Supporting trio — small mono strip below the headline. Each cell is
+   a tiny stat: numeral + label inline. */
+#missingEpisodesPage[data-me-style="revamp"] .me-stat:not(.danger) .v {
+    font-family: var(--rv-mono) !important;
+    font-weight: 700 !important;
+    font-size: 22px !important;
+    letter-spacing: -0.01em !important;
+    line-height: 1 !important;
+    color: var(--text) !important;
+    display: inline-block !important;
+    vertical-align: middle;
+    margin-right: 10px;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-stat:not(.danger) .k {
+    font: 500 10px/1 var(--rv-mono) !important;
+    letter-spacing: 0.18em !important;
+    text-transform: uppercase !important;
+    color: var(--dim-2) !important;
+    display: inline-block !important;
+    vertical-align: middle;
+    margin-top: 0 !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-stat:not(.danger)::before {
+    /* Vertical hairline divider on the left of cells 2 and 3 of the
+       supporting trio. The first cell (shows) doesn't get one. */
+    content: "";
+    position: absolute;
+    left: 0; top: 6px; bottom: 6px;
+    width: 1px;
+    background: var(--border);
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-stat:nth-child(1)::before {
+    display: none;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-stat:not(.danger) {
+    padding-left: 22px !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-stat:nth-child(1) {
+    padding-left: 0 !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-stat .spark { display: none !important; }
+
+/* --- Toolbar — labeled control panel (v1.1.8) ---------------------------
+   Each segment group gets a mono uppercase label injected above it via
+   ::before. Search field becomes terminal-style (no icon prefix, just a
+   tracked-out label). Search-all button is a strong indigo CTA pinned
+   to the right. Drops the wrapping card chrome. */
+#missingEpisodesPage[data-me-style="revamp"] .me-filters {
+    display: grid !important;
+    grid-template-columns: auto auto 1fr auto auto !important;
+    align-items: end !important;
+    gap: 14px 18px !important;
+    padding: 18px 0 !important;
+    background: transparent !important;
+    border: none !important;
+    border-top: 1px solid var(--border) !important;
+    border-bottom: 1px solid var(--border) !important;
+    border-radius: 0 !important;
+    margin-bottom: 24px !important;
+}
+/* Each segment group + the search box are themselves wrappers — we use
+   ::before to add a tiny mono uppercase label above them. */
+#missingEpisodesPage[data-me-style="revamp"] .me-segment,
+#missingEpisodesPage[data-me-style="revamp"] .me-search {
+    position: relative;
+    margin-top: 16px !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] #meScopeSeg::before { content: "Scope"; }
+#missingEpisodesPage[data-me-style="revamp"] #meTypeSeg::before  { content: "Type"; }
+#missingEpisodesPage[data-me-style="revamp"] .me-search::before  { content: "Search"; }
+#missingEpisodesPage[data-me-style="revamp"] #meSortSeg::before  { content: "Sort"; }
+#missingEpisodesPage[data-me-style="revamp"] #meScopeSeg::before,
+#missingEpisodesPage[data-me-style="revamp"] #meTypeSeg::before,
+#missingEpisodesPage[data-me-style="revamp"] .me-search::before,
+#missingEpisodesPage[data-me-style="revamp"] #meSortSeg::before {
+    position: absolute;
+    top: -16px;
+    left: 0;
+    font: 600 9px/1 var(--rv-mono);
+    letter-spacing: 0.24em;
+    color: var(--accent);
+    text-transform: uppercase;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-segment {
+    background: var(--bg) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 10px !important;
+    padding: 3px !important;
+    height: 40px !important;
+    align-items: center;
+    display: inline-flex !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-segment button {
+    font: 600 11px/1 var(--rv-mono) !important;
+    letter-spacing: 0.12em !important;
+    text-transform: uppercase !important;
+    border-radius: 7px !important;
+    padding: 0 12px !important;
+    height: 32px !important;
+    color: var(--dim) !important;
+    background: transparent !important;
+    transition: all var(--rv-fast) var(--rv-ease) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-segment button:hover {
+    color: var(--text) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-segment button.active {
+    background: var(--accent) !important;
+    color: #fff !important;
+}
+/* Search field: drop the SVG icon prefix, replace with a mono ">" prompt
+   character via ::before on the wrapper. */
+#missingEpisodesPage[data-me-style="revamp"] .me-search > svg {
+    display: none !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-search input {
+    background: var(--bg) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 10px !important;
+    height: 40px !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    color: var(--text) !important;
+    font: 500 13px/1 var(--rv-mono) !important;
+    padding-left: 36px !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-search::after {
+    content: ">";
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    font: 700 14px/1 var(--rv-mono);
+    color: var(--accent);
+    pointer-events: none;
+    z-index: 2;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-search input:focus {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 3px oklch(72% 0.16 270 / 0.20) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-filters > .me-btn {
+    margin-left: 0 !important;
+    height: 40px !important;
+    border-radius: 10px !important;
+    font: 700 11px/1 var(--rv-mono) !important;
+    letter-spacing: 0.14em !important;
+    text-transform: uppercase !important;
+    background: var(--accent) !important;
+    border-color: var(--accent) !important;
+    color: #fff !important;
+    box-shadow: 0 6px 18px oklch(72% 0.16 270 / 0.30) !important;
+    margin-top: 16px !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-filters > .me-btn:hover {
+    box-shadow: 0 10px 28px oklch(72% 0.16 270 / 0.45) !important;
+    transform: translateY(-1px);
+}
+@media (max-width: 1100px) {
+    #missingEpisodesPage[data-me-style="revamp"] .me-filters {
+        grid-template-columns: 1fr 1fr !important;
+    }
+    #missingEpisodesPage[data-me-style="revamp"] .me-search {
+        grid-column: 1 / -1 !important;
+    }
+}
+
+/* --- v1.1.6: PREMIERE POSTERS — keep the grid, change the LOOK ---------
+   Reverted from v1.1.5's list view. User wanted the poster wall, just
+   visually distinctive from Classic's bordered-card-with-meta-strip.
+   Direction: posters as billboards. No card chrome (no panel bg, no
+   surrounding border). Bigger artwork, rounder corners (20px), title
+   underneath in display weight. Dramatic hover with scale + accent
+   glow ring + tilt. */
+#missingEpisodesPage[data-me-style="revamp"] .me-grid {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)) !important;
+    gap: 22px 18px !important;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    overflow: visible !important;
+    padding: 4px !important;
+}
+/* Card = no chrome. The poster IS the card. Title sits below in
+   display-weight type, no surrounding panel. Hover scales 1.04 with
+   a small rotation + accent-coloured outer ring. */
+#missingEpisodesPage[data-me-style="revamp"] .me-show {
+    display: flex !important;
+    flex-direction: column !important;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    gap: 12px !important;
+    overflow: visible !important;
+    cursor: pointer !important;
+    position: relative;
+    transition: transform 320ms cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-show:hover {
+    transform: scale(1.04) !important;
+    z-index: 2;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-show:active {
+    transform: scale(0.99) !important;
+    transition: transform 100ms ease-out !important;
+}
+
+/* Poster — bigger rounded corners, dramatic shadow, accent ring on hover. */
+#missingEpisodesPage[data-me-style="revamp"] .me-poster {
+    width: 100% !important;
+    padding-top: 148% !important;
+    border-radius: 18px !important;
+    border: 1px solid var(--border) !important;
+    overflow: hidden !important;
+    box-shadow: 0 8px 22px oklch(0% 0 0 / 0.40) !important;
+    transition: box-shadow 320ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+    position: relative;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-show:hover .me-poster {
+    box-shadow:
+        0 22px 48px oklch(0% 0 0 / 0.55),
+        0 0 0 2px var(--accent),
+        0 0 32px oklch(72% 0.16 270 / 0.35) !important;
+}
+/* Drop the bottom-fade overlay — the title isn't overlaid on the artwork
+   anymore (it's below). Pure poster surface. */
+#missingEpisodesPage[data-me-style="revamp"] .me-poster::after {
+    display: none !important;
+}
+
+/* Missing badge — bigger, bolder, with backdrop-blur tint. Sits TOP-LEFT
+   of the poster (Classic put it top-right) so it visually swaps sides
+   with Classic at a glance. */
+#missingEpisodesPage[data-me-style="revamp"] .me-badge {
+    top: 10px !important;
+    right: auto !important;
+    left: 10px !important;
+    background: linear-gradient(135deg, oklch(72% 0.20 22), oklch(70% 0.18 35)) !important;
+    box-shadow:
+        0 6px 18px oklch(70% 0.20 22 / 0.55),
+        inset 0 1px 0 oklch(100% 0 0 / 0.25) !important;
+    font: 700 12px/1 var(--rv-mono) !important;
+    letter-spacing: 0.10em !important;
+    text-transform: uppercase !important;
+    padding: 8px 14px !important;
+    border-radius: 999px !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-badge.low {
+    background: linear-gradient(135deg, oklch(78% 0.18 75), oklch(80% 0.16 90)) !important;
+    color: oklch(15% 0 0) !important;
+    box-shadow:
+        0 6px 18px oklch(78% 0.18 75 / 0.40),
+        inset 0 1px 0 oklch(100% 0 0 / 0.30) !important;
+}
+
+/* Size chip — bottom-right of the poster, frosted glass. Mirrors the
+   badge swap: Classic had it bottom-left, Revamp puts it bottom-right. */
+#missingEpisodesPage[data-me-style="revamp"] .me-size-chip {
+    bottom: 10px !important;
+    top: auto !important;
+    left: auto !important;
+    right: 10px !important;
+    background: oklch(0% 0 0 / 0.50) !important;
+    border: 1px solid oklch(100% 0 0 / 0.10) !important;
+    backdrop-filter: blur(12px) saturate(140%) !important;
+    -webkit-backdrop-filter: blur(12px) saturate(140%) !important;
+    font: 600 10px/1 var(--rv-mono) !important;
+    letter-spacing: 0.08em !important;
+    padding: .3rem .6rem !important;
+}
+
+/* Meta — sits BELOW the poster (not overlaid), no panel bg, no padding.
+   Title in display weight, subtitle in mono. */
+#missingEpisodesPage[data-me-style="revamp"] .me-show-meta {
+    position: static !important;
+    background: transparent !important;
+    padding: 0 4px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 4px !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-show-meta .t {
+    font-family: var(--rv-display) !important;
+    font-weight: 700 !important;
+    font-size: 14px !important;
+    letter-spacing: -0.005em !important;
+    color: var(--text) !important;
+    text-shadow: none !important;
+    line-height: 1.25 !important;
+    min-height: 0 !important;
+    -webkit-line-clamp: 2 !important;
+    -webkit-box-orient: vertical !important;
+    display: -webkit-box !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-show-meta .s {
+    font: 600 9px/1 var(--rv-mono) !important;
+    letter-spacing: 0.18em !important;
+    text-transform: uppercase !important;
+    color: var(--dim-2) !important;
+    text-shadow: none !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-show-meta .s .dot {
+    background: var(--border-strong) !important;
+}
+
+/* --- Detail header — magazine layout ------------------------------------ */
+#missingEpisodesPage[data-me-style="revamp"] .me-back {
+    font: 500 11px/1 var(--rv-mono) !important;
+    letter-spacing: 0.16em !important;
+    text-transform: uppercase !important;
+    border: 1px solid var(--border) !important;
+    background: var(--panel) !important;
+    color: var(--dim) !important;
+    border-radius: 999px !important;
+    padding: 8px 14px !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-back:hover {
+    color: var(--text) !important;
+    border-color: var(--border-strong) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-dhead {
+    background: var(--panel) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 18px !important;
+    grid-template-columns: 200px 1fr !important;
+    gap: 32px !important;
+    padding: 24px !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-dhead .info h2 {
+    font-family: var(--rv-display) !important;
+    font-weight: 700 !important;
+    font-size: clamp(24px, 3vw, 36px) !important;
+    letter-spacing: -0.02em !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-dhead .info .pill {
+    background: oklch(70% 0.20 22 / 0.18) !important;
+    color: oklch(85% 0.10 22) !important;
+    font: 600 11px/1 var(--rv-mono) !important;
+    letter-spacing: 0.10em !important;
+    text-transform: uppercase !important;
+    padding: 4px 10px !important;
+    border: 1px solid oklch(70% 0.20 22 / 0.40) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-dhead .info .pill.anime {
+    background: oklch(72% 0.16 270 / 0.18) !important;
+    color: oklch(82% 0.10 270) !important;
+    border-color: oklch(72% 0.16 270 / 0.40) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-progress {
+    height: 6px !important;
+    background: var(--bg) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 999px !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-progress-fill {
+    background: linear-gradient(90deg, var(--accent), var(--accent-2)) !important;
+    box-shadow: 0 0 12px color-mix(in oklch, var(--accent) 50%, transparent) !important;
+}
+
+/* --- Season list — vertical timeline ------------------------------------ */
+#missingEpisodesPage[data-me-style="revamp"] .me-season {
+    background: var(--panel) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 14px !important;
+    margin-top: 12px !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-season-head {
+    padding: 14px 18px !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-season-head h3 {
+    font-family: var(--rv-display) !important;
+    font-weight: 600 !important;
+    font-size: 15px !important;
+    letter-spacing: -0.005em !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-season-head .count {
+    font-family: var(--rv-mono) !important;
+    font-size: 12px !important;
+    letter-spacing: 0.04em !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-season-head .mini-bar {
+    height: 6px !important;
+    background: var(--bg) !important;
+    border: 1px solid var(--border) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-season-head .mini-bar-fill {
+    background: linear-gradient(90deg, var(--accent), var(--accent-2)) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-season-head .actions .me-btn {
+    font: 500 10px/1 var(--rv-mono) !important;
+    letter-spacing: 0.10em !important;
+    text-transform: uppercase !important;
+    border-radius: 999px !important;
+    height: 28px !important;
+    padding: 0 12px !important;
+}
+
+/* --- Episode rows — refined ------------------------------------------- */
+#missingEpisodesPage[data-me-style="revamp"] .me-ep {
+    background: var(--panel) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 12px !important;
+    transition: border-color var(--rv-fast) var(--rv-ease),
+                background var(--rv-fast) var(--rv-ease) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-ep:hover {
+    border-color: var(--border-strong) !important;
+    background: var(--panel-hi) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-ep-thumb {
+    border-radius: 8px !important;
+    border: 1px solid var(--border) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-ep-top .code {
+    font-family: var(--rv-mono) !important;
+    color: var(--accent) !important;
+    font-size: 11px !important;
+    letter-spacing: 0.08em !important;
+    text-transform: uppercase !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-ep-top .ti {
+    font-family: var(--rv-display) !important;
+    font-weight: 600 !important;
+    font-size: 14px !important;
+    letter-spacing: -0.005em !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-ep-top .air {
+    font-family: var(--rv-mono) !important;
+    font-size: 11px !important;
+    color: var(--dim-2) !important;
+    letter-spacing: 0.06em !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-ep-action button {
+    background: transparent !important;
+    border: 1px solid var(--border) !important;
+    color: var(--dim) !important;
+    border-radius: 999px !important;
+    font: 500 10px/1 var(--rv-mono) !important;
+    letter-spacing: 0.12em !important;
+    text-transform: uppercase !important;
+    padding: 8px 14px !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-ep-action button:hover {
+    background: var(--accent) !important;
+    border-color: var(--accent) !important;
+    color: #fff !important;
+}
+
+/* --- Scan history — vertical timeline (v1.1.8) -------------------------
+   Drop the panel + bordered rows. The history becomes a left-rail
+   timeline: each scan is a row with a tiny dot on the left rail
+   followed by the scan metadata. The most recent scan gets an indigo
+   accent; older scans fade to dim. */
+#missingEpisodesPage[data-me-style="revamp"] .me-history {
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    padding: 18px 0 !important;
+    margin-bottom: 24px !important;
+    border-top: 1px solid var(--border) !important;
+    border-bottom: 1px solid var(--border) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-history-head {
+    padding: 0 0 4px 0 !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-history-head h4 {
+    font: 700 10px/1 var(--rv-mono) !important;
+    letter-spacing: 0.24em !important;
+    text-transform: uppercase !important;
+    color: var(--accent) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-history-body {
+    padding-top: 14px !important;
+    border-top: none !important;
+    margin-top: 8px !important;
+    position: relative;
+}
+/* Vertical rail line on the left */
+#missingEpisodesPage[data-me-style="revamp"] .me-history-body::before {
+    content: "";
+    position: absolute;
+    left: 6px;
+    top: 14px; bottom: 8px;
+    width: 1px;
+    background: var(--border);
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-history-row {
+    grid-template-columns: auto auto auto auto auto !important;
+    padding: 10px 0 10px 24px !important;
+    font-family: var(--rv-mono) !important;
+    font-size: 12px !important;
+    border-bottom: none !important;
+    position: relative;
+    gap: 16px !important;
+}
+/* Timeline dot */
+#missingEpisodesPage[data-me-style="revamp"] .me-history-row::before {
+    content: "";
+    position: absolute;
+    left: 2px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    background: var(--bg);
+    border: 1px solid var(--border-strong);
+}
+/* The most recent scan (first row) gets an indigo accent dot. */
+#missingEpisodesPage[data-me-style="revamp"] .me-history-row:first-child::before {
+    background: var(--accent);
+    border-color: var(--accent);
+    box-shadow: 0 0 12px color-mix(in oklch, var(--accent) 50%, transparent);
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-history-row .time {
+    font: 600 11px/1 var(--rv-mono) !important;
+    color: var(--text) !important;
+    letter-spacing: 0.04em !important;
+    min-width: 80px !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-history-row:not(:first-child) .time {
+    color: var(--dim) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-history-row .src {
+    font: 700 9px/1 var(--rv-mono) !important;
+    letter-spacing: 0.18em !important;
+    border-radius: 4px !important;
+    padding: 4px 8px !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-history-row .src.sonarr {
+    background: oklch(72% 0.16 230 / 0.18) !important;
+    color: oklch(80% 0.10 230) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-history-row .src.jellyfin {
+    background: oklch(72% 0.16 270 / 0.18) !important;
+    color: oklch(82% 0.10 270) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-history-row .missing {
+    font: 700 12px/1 var(--rv-mono) !important;
+    color: oklch(70% 0.20 22) !important;
+    letter-spacing: -0.01em !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-history-row .shows,
+#missingEpisodesPage[data-me-style="revamp"] .me-history-row .dur {
+    font: 500 10px/1 var(--rv-mono) !important;
+    letter-spacing: 0.10em !important;
+    text-transform: uppercase !important;
+    color: var(--dim-2) !important;
+}
+
+/* --- Settings card ------------------------------------------------------ */
+#missingEpisodesPage[data-me-style="revamp"] .me-card {
+    background: var(--panel) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 16px !important;
+    padding: 24px !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-card h2 {
+    font-family: var(--rv-display) !important;
+    font-weight: 700 !important;
+    font-size: 18px !important;
+    letter-spacing: -0.01em !important;
+    margin-bottom: 18px !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-field label {
+    font: 500 10px/1 var(--rv-mono) !important;
+    letter-spacing: 0.16em !important;
+    text-transform: uppercase !important;
+    color: var(--dim-2) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-field input,
+#missingEpisodesPage[data-me-style="revamp"] .me-field select {
+    background: var(--bg) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 10px !important;
+    padding: 12px 14px !important;
+    color: var(--text) !important;
+    font: 500 13px/1 var(--rv-display) !important;
+    transition: border-color var(--rv-fast) var(--rv-ease),
+                box-shadow var(--rv-fast) var(--rv-ease) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-field input:focus,
+#missingEpisodesPage[data-me-style="revamp"] .me-field select:focus {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 3px oklch(72% 0.16 270 / 0.20) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-toggle {
+    font: 500 12px/1 var(--rv-display) !important;
+}
+
+/* --- Buttons (general) -------------------------------------------------- */
+#missingEpisodesPage[data-me-style="revamp"] .me-btn {
+    font: 500 13px/1 var(--rv-display) !important;
+    border-radius: 10px !important;
+    padding: 10px 16px !important;
+    transition: all var(--rv-fast) var(--rv-ease) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-btn.primary {
+    background: var(--accent) !important;
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 0 transparent;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-btn.primary:hover {
+    box-shadow: 0 8px 24px oklch(72% 0.16 270 / 0.30) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-btn:active {
+    transform: translateY(1px) !important;
+}
+
+/* --- Scan strip ---------------------------------------------------------- */
+#missingEpisodesPage[data-me-style="revamp"] .me-scan-strip {
+    background: var(--panel) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 14px !important;
+    padding: 14px 18px !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-scan-bar {
+    height: 6px !important;
+    background: var(--bg) !important;
+    border: 1px solid var(--border) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-scan-bar-fill {
+    background: linear-gradient(90deg, var(--accent), var(--accent-2)) !important;
+    box-shadow: 0 0 12px color-mix(in oklch, var(--accent) 50%, transparent) !important;
+}
+
+/* --- Empty + Note ------------------------------------------------------- */
+#missingEpisodesPage[data-me-style="revamp"] .me-empty {
+    background: var(--panel) !important;
+    border: 1px dashed var(--border) !important;
+    border-radius: 14px !important;
+    padding: 60px 24px !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-empty h3 {
+    font-family: var(--rv-display) !important;
+    font-weight: 600 !important;
+    font-size: 18px !important;
+    letter-spacing: -0.01em !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-note {
+    background: var(--panel) !important;
+    border: 1px solid var(--border) !important;
+    border-left: 3px solid var(--accent) !important;
+    border-radius: 0 10px 10px 0 !important;
+    padding: 14px 18px !important;
+    font-family: var(--rv-display) !important;
+}
+
+/* --- :focus-visible rings on every interactive surface ------------------ */
+#missingEpisodesPage[data-me-style="revamp"] .me-btn:focus-visible,
+#missingEpisodesPage[data-me-style="revamp"] .me-segment button:focus-visible,
+#missingEpisodesPage[data-me-style="revamp"] .me-show:focus-visible,
+#missingEpisodesPage[data-me-style="revamp"] .me-style-btn:focus-visible {
+    outline: none !important;
+    box-shadow:
+        0 0 0 2px var(--bg),
+        0 0 0 4px var(--accent),
+        0 0 0 5px oklch(72% 0.16 152 / 0.35) !important;
+}
+
+/* ============================================================================
+   v1.1.3 — Detail page redesign (the second-screen experience).
+   The list view was visibly different in v1.1.2 but the show detail / season
+   list / episode rows still read as Classic with extra mono. This layer
+   restructures those three surfaces enough that the difference is obvious.
+   Still CSS-only — leveraging existing class anchors.
+   ============================================================================ */
+
+/* --- Show detail header — magazine spread ------------------------------- */
+#missingEpisodesPage[data-me-style="revamp"] .me-dhead {
+    grid-template-columns: 240px 1fr !important;
+    gap: 36px !important;
+    padding: 28px !important;
+    border-radius: 20px !important;
+    background:
+        linear-gradient(180deg, oklch(20% 0.014 265) 0%, var(--panel) 100%),
+        var(--panel) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-dhead .poster {
+    border-radius: 14px !important;
+    border: 1px solid var(--border) !important;
+    box-shadow: 0 16px 36px oklch(0% 0 0 / 0.45) !important;
+}
+/* Eyebrow above the title — section number marker. */
+#missingEpisodesPage[data-me-style="revamp"] .me-dhead .info::before {
+    content: "02 / SHOW DETAIL";
+    display: block;
+    font: 500 11px/1 var(--rv-mono);
+    letter-spacing: 0.20em;
+    color: var(--dim-2);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-dhead .info h2 {
+    font-family: var(--rv-display) !important;
+    font-weight: 700 !important;
+    font-size: clamp(28px, 3.5vw, 44px) !important;
+    letter-spacing: -0.025em !important;
+    line-height: 1 !important;
+    margin: 0 0 14px 0 !important;
+}
+/* Stats line — mono pills with vertical hairline dividers (instead of dots). */
+#missingEpisodesPage[data-me-style="revamp"] .me-dhead .info .meta {
+    color: var(--dim) !important;
+    font: 500 11px/1 var(--rv-mono) !important;
+    letter-spacing: 0.10em !important;
+    text-transform: uppercase !important;
+    gap: 14px !important;
+    margin-bottom: 18px !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-dhead .info .meta .dot {
+    width: 1px !important;
+    height: 14px !important;
+    border-radius: 0 !important;
+    background: var(--border-strong) !important;
+}
+/* Path block — terminal/monospaced box. v1.1.4: dropped the 3px left
+   accent stripe (impeccable absolute-ban: side-stripe >1px as decoration
+   on cards/list items). Replaced with a uniform hairline border + a mono
+   prefix label "PATH" to give the same "this is a structured field"
+   reading without violating the rule. */
+#missingEpisodesPage[data-me-style="revamp"] .me-dhead .info .path {
+    background: var(--bg) !important;
+    border: 1px solid var(--border) !important;
+    padding: 10px 14px !important;
+    font-family: var(--rv-mono) !important;
+    font-size: 11px !important;
+    border-radius: 8px !important;
+    margin-top: 16px !important;
+    position: relative;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-dhead .info .path::before {
+    content: "PATH";
+    display: inline-block;
+    margin-right: 12px;
+    padding: 2px 7px;
+    font: 700 9px/1 var(--rv-mono);
+    letter-spacing: 0.18em;
+    color: var(--accent);
+    background: oklch(72% 0.16 270 / 0.14);
+    border-radius: 4px;
+    vertical-align: 1px;
+}
+/* Action buttons — bigger, clearer hierarchy. */
+#missingEpisodesPage[data-me-style="revamp"] .me-dhead .info .actions {
+    gap: 8px !important;
+    margin-top: 18px !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-dhead .info .actions .me-btn {
+    font: 600 11px/1 var(--rv-mono) !important;
+    letter-spacing: 0.12em !important;
+    text-transform: uppercase !important;
+    padding: 12px 18px !important;
+    border-radius: 10px !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-dhead .info .actions .me-btn.primary {
+    box-shadow: 0 8px 24px oklch(72% 0.16 270 / 0.30) !important;
+}
+
+/* --- Season header — chapter marker ------------------------------------- */
+/* The big change: each season gets a massive mono number on the left as a
+   chapter marker, like a magazine section divider. Existing markup has
+   `.me-season-head h3` containing "Season 1" plus a `.count` span — we
+   restyle the h3 and add a ::before with a counter-style number. */
+#missingEpisodesPage[data-me-style="revamp"] .me-season {
+    margin-top: 14px !important;
+    border-radius: 16px !important;
+    overflow: visible !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-season-head {
+    padding: 20px 22px !important;
+    align-items: center !important;
+    gap: 18px !important;
+}
+/* Use CSS counters to put a giant "01" / "02" / "03" left-edge marker.
+   Reset the counter at the seasons container, increment per season head. */
+#missingEpisodesPage[data-me-style="revamp"] #meDetailSeasons {
+    counter-reset: rv-season;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-season-head::before {
+    counter-increment: rv-season;
+    content: counter(rv-season, decimal-leading-zero);
+    flex: 0 0 auto;
+    font: 700 36px/1 var(--rv-mono);
+    letter-spacing: -0.02em;
+    color: var(--accent);
+    min-width: 56px;
+    text-align: left;
+    opacity: 0.85;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-season-head h3 {
+    font-family: var(--rv-display) !important;
+    font-weight: 700 !important;
+    font-size: 18px !important;
+    letter-spacing: -0.01em !important;
+}
+/* Mini progress bar — fatter + tier-coloured by completeness. */
+#missingEpisodesPage[data-me-style="revamp"] .me-season-head .mini-bar {
+    width: 140px !important;
+    height: 8px !important;
+    border-radius: 999px !important;
+    background: var(--bg) !important;
+    border: 1px solid var(--border) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-season-head .mini-bar-fill {
+    background: linear-gradient(90deg, var(--accent), var(--accent-2)) !important;
+    box-shadow: 0 0 12px color-mix(in oklch, var(--accent) 50%, transparent) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-season-head .count {
+    font: 600 12px/1 var(--rv-mono) !important;
+    letter-spacing: 0.08em !important;
+    color: var(--dim) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-season-head .count .missing {
+    color: oklch(70% 0.20 22) !important;
+    margin-left: 12px !important;
+}
+
+/* --- Episode rows — full restructure ------------------------------------ */
+/* Row layout becomes: [big SXX prefix block] [thumbnail] [body] [action].
+   The episode code goes from a small mono span inline with the title to a
+   wide mono block on the very left of the row, with the season letter as
+   an eyebrow and the episode number as a giant mono numeral.
+   We do this by hiding the existing inline .code, and using a ::before
+   on .me-ep that pulls the original text via attr() — but the markup
+   doesn't expose that as an attribute. Instead, restyle .code itself
+   into a wide left-edge block by giving .me-ep flex order/sizing tricks. */
+#missingEpisodesPage[data-me-style="revamp"] .me-ep {
+    border-radius: 14px !important;
+    padding: 14px 16px !important;
+    gap: 16px !important;
+    background: var(--panel) !important;
+    align-items: stretch !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-ep:hover {
+    background: var(--panel-hi) !important;
+    border-color: var(--accent) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-ep-thumb {
+    flex: 0 0 140px !important;
+    aspect-ratio: 16/9 !important;
+    border-radius: 10px !important;
+    border: 1px solid var(--border) !important;
+}
+/* Episode meta restructure: move .code out of the .me-ep-top inline group
+   to be a giant mono numeral on its own row above the title. */
+#missingEpisodesPage[data-me-style="revamp"] .me-ep-body {
+    gap: 4px !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-ep-top {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 2px !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-ep-top .code {
+    order: -1 !important;
+    font: 700 11px/1 var(--rv-mono) !important;
+    letter-spacing: 0.14em !important;
+    text-transform: uppercase !important;
+    color: var(--accent) !important;
+    background: oklch(72% 0.16 270 / 0.12) !important;
+    padding: 4px 8px !important;
+    border-radius: 6px !important;
+    border: 1px solid oklch(72% 0.16 270 / 0.30) !important;
+    margin-bottom: 4px !important;
+    align-self: flex-start;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-ep-top .ti {
+    font-family: var(--rv-display) !important;
+    font-weight: 700 !important;
+    font-size: 16px !important;
+    letter-spacing: -0.01em !important;
+    line-height: 1.2 !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-ep-top .air {
+    margin-left: 0 !important;
+    font: 500 10px/1 var(--rv-mono) !important;
+    letter-spacing: 0.12em !important;
+    text-transform: uppercase !important;
+    color: var(--dim-2) !important;
+    margin-top: 2px !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-ep-ov {
+    font-size: 13px !important;
+    line-height: 1.5 !important;
+    color: var(--dim) !important;
+    margin-top: 4px !important;
+}
+/* Search button: bigger, clearer. */
+#missingEpisodesPage[data-me-style="revamp"] .me-ep-action button {
+    background: var(--accent) !important;
+    border: 1px solid var(--accent) !important;
+    color: #fff !important;
+    border-radius: 10px !important;
+    font: 700 11px/1 var(--rv-mono) !important;
+    letter-spacing: 0.16em !important;
+    text-transform: uppercase !important;
+    padding: 12px 18px !important;
+    box-shadow: 0 6px 18px oklch(72% 0.16 270 / 0.30) !important;
+    transition: transform var(--rv-fast) var(--rv-ease),
+                box-shadow var(--rv-fast) var(--rv-ease) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-ep-action button:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 12px 28px oklch(72% 0.16 270 / 0.45) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-ep-action button:active {
+    transform: translateY(0) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-ep.searched {
+    background: oklch(72% 0.16 152 / 0.06) !important;
+    border-color: oklch(72% 0.16 152 / 0.35) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-ep.searched .me-ep-action button {
+    background: oklch(72% 0.16 152) !important;
+    border-color: oklch(72% 0.16 152) !important;
+    box-shadow: 0 6px 18px oklch(72% 0.16 152 / 0.35) !important;
+}
+
+/* --- Back button — refined ---------------------------------------------- */
+#missingEpisodesPage[data-me-style="revamp"] .me-back {
+    margin-bottom: 20px !important;
+}
+
+/* ============================================================================
+   v1.1.4 — design-skill conformance pass
+   - impeccable: dropped the side-stripe border on the path block (above)
+   - ui-ux-pro-max: bump touch targets to 44px min on action buttons
+   - stitch / design-taste-frontend: perpetual micro-loops, spring overshoot
+     on primary CTAs, episode-row rhythm via :nth-child banding
+   ============================================================================ */
+
+/* Perpetual shimmer on the dominant Missing Episodes count — slow, low
+   contrast, draws the eye to the headline number without strobe. */
+@keyframes me-rv-stat-shimmer {
+    0%, 100% { background-position: -200% 0; }
+    50%      { background-position:  200% 0; }
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-stat.danger .v {
+    background: linear-gradient(
+        100deg,
+        oklch(70% 0.20 22) 0%,
+        oklch(70% 0.20 22) 35%,
+        oklch(85% 0.16 22 / 0.85) 50%,
+        oklch(70% 0.20 22) 65%,
+        oklch(70% 0.20 22) 100%
+    ) !important;
+    background-size: 200% 100% !important;
+    -webkit-background-clip: text !important;
+            background-clip: text !important;
+    -webkit-text-fill-color: transparent !important;
+            color: transparent !important;
+    animation: me-rv-stat-shimmer 4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+    #missingEpisodesPage[data-me-style="revamp"] .me-stat.danger .v {
+        animation: none;
+        -webkit-text-fill-color: oklch(70% 0.20 22) !important;
+                color: oklch(70% 0.20 22) !important;
+    }
+}
+
+/* Spring overshoot on primary CTA hover — overshoots ~5% past 1.0 and
+   settles back. Reads as physical recoil, not a fade. design-taste-frontend
+   calls this magnetic micro-physics. */
+#missingEpisodesPage[data-me-style="revamp"] .me-btn.primary {
+    transition: transform 280ms cubic-bezier(0.34, 1.56, 0.64, 1),
+                box-shadow 280ms cubic-bezier(0.16, 1, 0.3, 1),
+                background 180ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-btn.primary:hover {
+    transform: translateY(-2px) scale(1.02) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-btn.primary:active {
+    transform: translateY(0) scale(0.97) !important;
+    transition: transform 80ms ease-out !important;
+}
+
+/* Episode rows: rhythm via :nth-child(even) backplate. Uniform rows look
+   like a CMS table; alternating tint reads as a list with cadence. */
+#missingEpisodesPage[data-me-style="revamp"] .me-ep:nth-child(even) {
+    background: oklch(20% 0.014 265) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-ep:nth-child(even):hover {
+    background: var(--panel-hi) !important;
+}
+
+/* Episode action button — 44px min touch target (was ~35px). */
+#missingEpisodesPage[data-me-style="revamp"] .me-ep-action button {
+    min-height: 44px !important;
+    padding: 12px 20px !important;
+}
+
+/* Episode code presentation: split visually so "S01" reads as a small
+   eyebrow above the episode-number numeral. We can't restructure the
+   markup so we use letter-spacing + a clever pseudo-element to imply
+   the split — replace the chip with a 2-line stack via CSS only. */
+#missingEpisodesPage[data-me-style="revamp"] .me-ep-top .code {
+    /* Override the v1.1.3 chip styling — go for a typographic-only
+       presentation that reads as editorial / magazine. */
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+    margin-bottom: 6px !important;
+    font: 700 11px/1 var(--rv-mono) !important;
+    color: var(--accent) !important;
+    letter-spacing: 0.20em !important;
+    /* Tracked-out so it reads as a label, not a tag. */
+}
+
+/* Hover lift on episode rows — subtle but physical. */
+#missingEpisodesPage[data-me-style="revamp"] .me-ep {
+    transition:
+        background var(--rv-fast) var(--rv-ease),
+        border-color var(--rv-fast) var(--rv-ease),
+        transform 280ms cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-ep:hover {
+    transform: translateX(2px) !important;
+    border-color: var(--accent) !important;
+}
+
+/* The big "Search all missing" detail-page CTA — emphasized further. */
+#missingEpisodesPage[data-me-style="revamp"] .me-dhead .info .actions .me-btn.primary {
+    padding: 14px 22px !important;
+    font: 700 12px/1 var(--rv-mono) !important;
+    letter-spacing: 0.14em !important;
+}
+
+/* The hero "Scan now" CTA gets the same physical recoil. */
+#missingEpisodesPage[data-me-style="revamp"] #meScanBtn {
+    box-shadow: 0 8px 24px oklch(72% 0.16 270 / 0.30),
+                inset 0 1px 0 oklch(100% 0 0 / 0.10) !important;
+}
+#missingEpisodesPage[data-me-style="revamp"] #meScanBtn:hover {
+    box-shadow: 0 14px 36px oklch(72% 0.16 270 / 0.45),
+                inset 0 1px 0 oklch(100% 0 0 / 0.16) !important;
+}
 </style>
 
 <div class="me">
@@ -370,6 +1600,12 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
             Scan now
           </button>
+          <!-- v1.1.0: Classic / Revamp toggle. Persists via me-style-pref localStorage.
+               Classic = the v1.0.8 look you know. Revamp = editorial/database refresh. -->
+          <div class="me-style-toggle" id="meStyleToggle" role="group" aria-label="UI style">
+            <button type="button" class="me-style-btn" data-me-style="classic" aria-pressed="true">Classic</button>
+            <button type="button" class="me-style-btn" data-me-style="revamp"  aria-pressed="false">Revamp</button>
+          </div>
         </div>
       </div>
     </div>
@@ -547,6 +1783,43 @@
 (function () {
     var PLUGIN_ID = 'b7a24c68-7f3e-4c0a-9a9e-6e2b9e1a4f33';
     var page = document.querySelector('#missingEpisodesPage');
+
+    // v1.1.0: Classic / Revamp toggle. Reads me-style-pref from localStorage,
+    // stamps data-me-style="revamp" on the page root when active, and wires
+    // click handlers on the segmented toggle in the hero.
+    var ME_STYLE_KEY = 'me-style-pref';
+    function applyMeStyle(pref) {
+        if (!page) return;
+        if (pref === 'revamp') {
+            page.setAttribute('data-me-style', 'revamp');
+        } else {
+            page.removeAttribute('data-me-style');
+        }
+        var host = document.getElementById('meStyleToggle');
+        if (host) {
+            host.querySelectorAll('button[data-me-style]').forEach(function (b) {
+                b.setAttribute('aria-pressed', b.getAttribute('data-me-style') === pref ? 'true' : 'false');
+            });
+        }
+    }
+    try {
+        var __mePref = (function () {
+            try { return localStorage.getItem(ME_STYLE_KEY) === 'revamp' ? 'revamp' : 'classic'; }
+            catch (e) { return 'classic'; }
+        })();
+        applyMeStyle(__mePref);
+        var __meHost = document.getElementById('meStyleToggle');
+        if (__meHost) {
+            __meHost.addEventListener('click', function (ev) {
+                var btn = ev.target.closest('button[data-me-style]');
+                if (!btn) return;
+                var next = btn.getAttribute('data-me-style');
+                try { localStorage.setItem(ME_STYLE_KEY, next); } catch (e) {}
+                applyMeStyle(next);
+            });
+        }
+    } catch (e) { /* swallow — toggle is non-critical */ }
+
     var state = { result: null, filtered: [], current: null, cfg: null,
                   sort: 'count', query: '', type: 'all', scope: 'active',
                   cfgOpen: false, pollId: null };
@@ -1105,9 +2378,23 @@
                     : '<div class="me-ep-thumb"><div class="me-ph">' + code + '</div></div>';
                 var air = ep.AirDateUtc ? new Date(ep.AirDateUtc).toLocaleDateString() : '';
                 var canSearch = searchable && ep.Id > 0;
+                // v1.1.8: context-aware tooltip. The grey-out is correct
+                // (no Sonarr ID = nothing to dispatch a search to), but
+                // the previous tooltip "Configure Sonarr to enable" was
+                // misleading when Sonarr WAS configured for the show but
+                // this specific episode came from TMDB / gap-detection
+                // and has Id=0.
+                var lockReason;
+                if (!state.result || !state.result.SonarrConfigured) {
+                    lockReason = 'Configure Sonarr to enable searching';
+                } else if (ep.Id <= 0) {
+                    lockReason = 'Not tracked by Sonarr (detected via TMDB / gap detection — Sonarr would need to import this show first)';
+                } else {
+                    lockReason = 'Cannot search';
+                }
                 var btn = canSearch
                     ? '<div class="me-ep-action"><button type="button" data-id="' + ep.Id + '">Search</button></div>'
-                    : '<div class="me-ep-action locked"><button type="button" disabled title="Configure Sonarr to enable">Search</button></div>';
+                    : '<div class="me-ep-action locked"><button type="button" disabled title="' + escapeHtml(lockReason) + '">Search</button></div>';
                 return '<div class="me-ep" data-id="' + ep.Id + '">'
                     + thumb
                     + '<div class="me-ep-body">'
