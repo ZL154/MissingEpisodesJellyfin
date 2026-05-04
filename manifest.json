@@ -9,6 +9,14 @@
     "imageUrl": null,
     "versions": [
       {
+        "version": "1.0.10.0",
+        "changelog": "Scan efficiency overhaul. UI is unchanged.\n- Sonarr per-series episode fetches now parallel (8 in flight). 100-show library ~8s sequential RTT -> ~1s.\n- Jellyfin-mode Sonarr enrichment parallelized the same way.\n- TMDB season fetches parallelized (4 in flight, well under TMDB's rate budget).\n- ApplySonarrHasFile rewritten O(N*M) -> O(N). HashSet + List.RemoveAll instead of repeated List.Remove; seasons indexed once.\n- ignoredTvdb HashSet hoisted out of per-series loop.\n- JSON persistence switched to async I/O (WriteAllTextAsync).\nOutput is identical for identical input — pure internal refactor.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/ZL154/MissingEpisodesJellyfin/releases/download/v1.0.10/Jellyfin.Plugin.MissingEpisodes_1.0.10.0.zip",
+        "checksum": "ca3a5b9ecdadeedb6b4c97618ffd460c",
+        "timestamp": "2026-05-04T04:00:00Z"
+      },
+      {
         "version": "1.0.9.0",
         "changelog": "Editorial Revamp UI with Classic toggle.\n- New Classic/Revamp segmented toggle in the hero. Old look stays exactly as it was; flip to Revamp for a full editorial overhaul (magazine spread, not dashboard). Preference saved per-browser.\n- Revamp direction: ribbon hero with eyebrow + giant missing-count numeral hoisted via grid-template-areas, terminal-style `>` prompt search, vertical timeline scan history with circular dots, premiere-poster billboard cards (no chrome), chapter-numbered season heads via CSS counter, episode codes typeset as tracked-out mono eyebrows, settings card with mono uppercase labels.\n- All Revamp rules scoped to #missingEpisodesPage[data-me-style=revamp] so the v1.0.8 Classic look is fully preserved.\n- Fix: locked Search button tooltip on TMDB-detected episodes (Id=0) used to say 'Configure Sonarr to enable searching' even when Sonarr was configured. Tooltip now distinguishes 'Sonarr not configured' vs 'Not tracked by Sonarr'.",
         "targetAbi": "10.11.0.0",
