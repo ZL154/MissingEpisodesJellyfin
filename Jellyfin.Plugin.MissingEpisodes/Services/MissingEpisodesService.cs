@@ -94,7 +94,7 @@ public class MissingEpisodesService
         }
     }
 
-    private void PersistLast(ScanResult result)
+    private async Task PersistLastAsync(ScanResult result, CancellationToken ct = default)
     {
         try
         {
@@ -102,12 +102,19 @@ public class MissingEpisodesService
             var path = LastResultPath;
             if (dir == null || path == null) return;
             Directory.CreateDirectory(dir);
-            File.WriteAllText(path, JsonSerializer.Serialize(result, PersistJsonOpts));
+            await File.WriteAllTextAsync(path, JsonSerializer.Serialize(result, PersistJsonOpts), ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to persist last scan result");
         }
+    }
+
+    // Sync wrapper retained for refresh paths that splice into a cached result.
+    // Drops to fire-and-forget so the request thread isn't blocked on disk.
+    private void PersistLast(ScanResult result)
+    {
+        _ = Task.Run(() => PersistLastAsync(result));
     }
 
     public List<ScanHistoryEntry> LoadHistory()
@@ -126,7 +133,7 @@ public class MissingEpisodesService
         }
     }
 
-    private void AppendHistory(ScanHistoryEntry entry)
+    private async Task AppendHistoryAsync(ScanHistoryEntry entry, CancellationToken ct = default)
     {
         try
         {
@@ -137,7 +144,7 @@ public class MissingEpisodesService
             var list = LoadHistory();
             list.Insert(0, entry);
             if (list.Count > 25) list.RemoveRange(25, list.Count - 25);
-            File.WriteAllText(path, JsonSerializer.Serialize(list, PersistJsonOpts));
+            await File.WriteAllTextAsync(path, JsonSerializer.Serialize(list, PersistJsonOpts), ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -205,8 +212,8 @@ public class MissingEpisodesService
             cfg.LastScanIso = result.ScannedAtUtc.ToString("o");
             Plugin.Instance?.SaveConfiguration();
 
-            PersistLast(result);
-            AppendHistory(new ScanHistoryEntry
+            await PersistLastAsync(result, ct).ConfigureAwait(false);
+            await AppendHistoryAsync(new ScanHistoryEntry
             {
                 ScannedAtUtc = result.ScannedAtUtc,
                 Source = result.Source,
@@ -215,7 +222,7 @@ public class MissingEpisodesService
                 ShowCount = result.Series.Count,
                 IgnoredCount = result.IgnoredSeries.Count,
                 DurationMs = Math.Max(0, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - Progress.StartedAtMs)
-            });
+            }, ct).ConfigureAwait(false);
 
             _ = NotifyAdminsAsync(result);
             return result;
@@ -255,6 +262,12 @@ public class MissingEpisodesService
         }
     }
 
+    // Cap concurrent Sonarr/TMDB requests so we don't slam a small instance. 8 in flight
+    // collapses a 100-show scan from ~8s of sequential RTT to ~1s without meaningfully
+    // pressuring Sonarr.
+    private const int SonarrParallelism = 8;
+    private const int TmdbParallelism = 4;
+
     private async Task<ScanResult> ScanSonarrAsync(PluginConfiguration cfg, CancellationToken ct)
     {
         var ignored = new HashSet<int>(cfg.IgnoredSeriesTvdbIds);
@@ -271,11 +284,14 @@ public class MissingEpisodesService
             Series = new List<ScanSeries>()
         };
 
+        // Partition into ignored (no fetch) + fetchable. Ignored entries still tick
+        // progress so the bar fills correctly.
+        var fetchable = new List<SonarrSeries>(allSeries.Count);
         foreach (var s in allSeries)
         {
-            Progress.Advance(s.Title);
             if (ignored.Contains(s.TvdbId))
             {
+                Progress.Advance(s.Title);
                 result.IgnoredSeries.Add(new ScanSeries
                 {
                     SonarrId = s.Id,
@@ -293,82 +309,116 @@ public class MissingEpisodesService
                 });
                 continue;
             }
-            if (cfg.OnlyMonitored && !s.Monitored) continue;
+            if (cfg.OnlyMonitored && !s.Monitored) { Progress.Advance(s.Title); continue; }
+            fetchable.Add(s);
+        }
 
-            List<SonarrEpisode> eps;
+        var entries = await ParallelMapAsync(fetchable, SonarrParallelism, ct, async s =>
+        {
             try
             {
-                eps = await _sonarr.GetEpisodesAsync(cfg.SonarrUrl, cfg.SonarrApiKey, s.Id, ct).ConfigureAwait(false);
+                var eps = await _sonarr.GetEpisodesAsync(cfg.SonarrUrl, cfg.SonarrApiKey, s.Id, ct).ConfigureAwait(false);
+                Progress.Advance(s.Title);
+                return BuildSonarrEntry(cfg, s, eps, jellyfinByTvdb, now);
             }
             catch (Exception ex)
             {
+                Progress.Advance(s.Title);
                 _logger.LogWarning(ex, "Failed to fetch episodes for series {Title}", s.Title);
-                continue;
+                return null;
             }
+        }).ConfigureAwait(false);
 
-            // Build per-season stats over the episodes that count (honoring ignore flags).
-            var seasonStats = new Dictionary<int, SeasonCount>();
-            var missing = new List<MissingEpisode>();
-            foreach (var ep in eps)
-            {
-                if (cfg.IgnoreSpecials && ep.SeasonNumber == 0) continue;
-                if (cfg.OnlyMonitored && !ep.Monitored) continue;
-                var unaired = ep.AirDateUtc == null || ep.AirDateUtc > now;
-                if (cfg.IgnoreUnaired && unaired) continue;
-
-                if (!seasonStats.TryGetValue(ep.SeasonNumber, out var stats)) stats = new SeasonCount();
-                stats.Total += 1;
-                if (ep.HasFile) stats.Have += 1;
-                seasonStats[ep.SeasonNumber] = stats;
-
-                if (ep.HasFile) continue;
-                missing.Add(new MissingEpisode
-                {
-                    Id = ep.Id,
-                    SeasonNumber = ep.SeasonNumber,
-                    EpisodeNumber = ep.EpisodeNumber,
-                    Title = ep.Title,
-                    AirDateUtc = ep.AirDateUtc,
-                    Overview = ep.Overview,
-                    FinaleType = ep.FinaleType,
-                    ThumbnailUrl = PickImage(ep.Images, "screenshot")
-                });
-            }
-
-            if (missing.Count == 0) continue;
-
-            jellyfinByTvdb.TryGetValue(s.TvdbId, out var jfId);
-
-            result.Series.Add(new ScanSeries
-            {
-                SonarrId = s.Id,
-                TvdbId = s.TvdbId,
-                TmdbId = s.TmdbId,
-                JellyfinSeriesId = jfId,
-                Title = s.Title,
-                Year = s.Year,
-                Network = s.Network,
-                Status = s.Status,
-                Path = s.Path,
-                SeriesType = NormalizeSeriesType(s.SeriesType),
-                PosterUrl = PickImage(s.Images, "poster"),
-                BackdropUrl = PickImage(s.Images, "fanart") ?? PickImage(s.Images, "banner"),
-                MissingCount = missing.Count,
-                HaveEpisodes = seasonStats.Values.Sum(x => x.Have),
-                TotalEpisodes = seasonStats.Values.Sum(x => x.Total),
-                SizeOnDisk = s.Statistics?.SizeOnDisk ?? 0,
-                Seasons = seasonStats.OrderBy(kv => kv.Key).Select(kv => new SeasonSummary
-                {
-                    SeasonNumber = kv.Key,
-                    TotalEpisodes = kv.Value.Total,
-                    HaveEpisodes = kv.Value.Have
-                }).ToList(),
-                Missing = missing
-            });
-        }
+        foreach (var e in entries) if (e != null) result.Series.Add(e);
 
         FinalizeResult(result);
         return result;
+    }
+
+    private ScanSeries? BuildSonarrEntry(PluginConfiguration cfg, SonarrSeries s, List<SonarrEpisode> eps,
+        Dictionary<int, string> jellyfinByTvdb, DateTime now)
+    {
+        var seasonStats = new Dictionary<int, SeasonCount>();
+        var missing = new List<MissingEpisode>();
+        foreach (var ep in eps)
+        {
+            if (cfg.IgnoreSpecials && ep.SeasonNumber == 0) continue;
+            if (cfg.OnlyMonitored && !ep.Monitored) continue;
+            var unaired = ep.AirDateUtc == null || ep.AirDateUtc > now;
+            if (cfg.IgnoreUnaired && unaired) continue;
+
+            if (!seasonStats.TryGetValue(ep.SeasonNumber, out var stats)) stats = new SeasonCount();
+            stats.Total += 1;
+            if (ep.HasFile) stats.Have += 1;
+            seasonStats[ep.SeasonNumber] = stats;
+
+            if (ep.HasFile) continue;
+            missing.Add(new MissingEpisode
+            {
+                Id = ep.Id,
+                SeasonNumber = ep.SeasonNumber,
+                EpisodeNumber = ep.EpisodeNumber,
+                Title = ep.Title,
+                AirDateUtc = ep.AirDateUtc,
+                Overview = ep.Overview,
+                FinaleType = ep.FinaleType,
+                ThumbnailUrl = PickImage(ep.Images, "screenshot")
+            });
+        }
+
+        if (missing.Count == 0) return null;
+
+        jellyfinByTvdb.TryGetValue(s.TvdbId, out var jfId);
+
+        return new ScanSeries
+        {
+            SonarrId = s.Id,
+            TvdbId = s.TvdbId,
+            TmdbId = s.TmdbId,
+            JellyfinSeriesId = jfId,
+            Title = s.Title,
+            Year = s.Year,
+            Network = s.Network,
+            Status = s.Status,
+            Path = s.Path,
+            SeriesType = NormalizeSeriesType(s.SeriesType),
+            PosterUrl = PickImage(s.Images, "poster"),
+            BackdropUrl = PickImage(s.Images, "fanart") ?? PickImage(s.Images, "banner"),
+            MissingCount = missing.Count,
+            HaveEpisodes = seasonStats.Values.Sum(x => x.Have),
+            TotalEpisodes = seasonStats.Values.Sum(x => x.Total),
+            SizeOnDisk = s.Statistics?.SizeOnDisk ?? 0,
+            Seasons = seasonStats.OrderBy(kv => kv.Key).Select(kv => new SeasonSummary
+            {
+                SeasonNumber = kv.Key,
+                TotalEpisodes = kv.Value.Total,
+                HaveEpisodes = kv.Value.Have
+            }).ToList(),
+            Missing = missing
+        };
+    }
+
+    // Bounded-parallel map. Output order tracks the input list. Uses a SemaphoreSlim
+    // gate so at most `parallelism` selectors run concurrently.
+    private static async Task<List<TResult?>> ParallelMapAsync<TIn, TResult>(
+        IReadOnlyList<TIn> items, int parallelism, CancellationToken ct,
+        Func<TIn, Task<TResult?>> selector) where TResult : class
+    {
+        if (items.Count == 0) return new List<TResult?>();
+        var gate = new SemaphoreSlim(parallelism, parallelism);
+        var tasks = new Task<TResult?>[items.Count];
+        for (var i = 0; i < items.Count; i++)
+        {
+            var captured = items[i];
+            tasks[i] = Task.Run(async () =>
+            {
+                await gate.WaitAsync(ct).ConfigureAwait(false);
+                try { return await selector(captured).ConfigureAwait(false); }
+                finally { gate.Release(); }
+            }, ct);
+        }
+        var arr = await Task.WhenAll(tasks).ConfigureAwait(false);
+        return new List<TResult?>(arr);
     }
 
     private async Task<ScanResult> ScanJellyfinOnlyAsync(PluginConfiguration cfg, CancellationToken ct)
@@ -450,7 +500,7 @@ public class MissingEpisodesService
                 sonarrPath = sS.Path;
             }
 
-            var entry = await ProcessJellyfinSeriesAsync(cfg, series, mode, sonarrPath, ct).ConfigureAwait(false);
+            var entry = await ProcessJellyfinSeriesAsync(cfg, series, mode, sonarrPath, ct, ignoredTvdb).ConfigureAwait(false);
             if (entry != null) result.Series.Add(entry);
         }
 
@@ -473,19 +523,24 @@ public class MissingEpisodesService
         var detail = await _tmdb.GetSeriesAsync(cfg.TmdbApiKey, tmdbId, ct).ConfigureAwait(false);
         if (detail?.Seasons == null || detail.Seasons.Count == 0) return false;
 
-        var tmdbSeasons = detail.Seasons.Select(x => x.SeasonNumber).Where(sn => !(cfg.IgnoreSpecials && sn == 0));
+        var tmdbSeasons = detail.Seasons.Select(x => x.SeasonNumber)
+            .Where(sn => !(cfg.IgnoreSpecials && sn == 0))
+            .ToList();
 
-        foreach (var sn in tmdbSeasons)
+        // Fan out season fetches in parallel. TMDB rate-limits at ~50 req/sec, so 4 in
+        // flight is well within the budget while collapsing 10-season shows from 10
+        // sequential RTTs to ~3.
+        var seasonResults = await ParallelMapAsync<int, TmdbSeasonDetail>(tmdbSeasons, TmdbParallelism, ct, async sn =>
         {
-            TmdbSeasonDetail? season;
-            try
-            {
-                season = await _tmdb.GetSeasonAsync(cfg.TmdbApiKey, tmdbId, sn, ct).ConfigureAwait(false);
-            }
-            catch (System.Net.Http.HttpRequestException)
-            {
-                continue;
-            }
+            try { return await _tmdb.GetSeasonAsync(cfg.TmdbApiKey, tmdbId, sn, ct).ConfigureAwait(false); }
+            catch (System.Net.Http.HttpRequestException) { return null; }
+        }).ConfigureAwait(false);
+
+        // Merge sequentially — `missing` and `expectedBySeason` aren't thread-safe.
+        for (var i = 0; i < tmdbSeasons.Count; i++)
+        {
+            var sn = tmdbSeasons[i];
+            var season = seasonResults[i];
             if (season?.Episodes == null) continue;
 
             presentBySeason.TryGetValue(sn, out var presentSet);
@@ -729,9 +784,9 @@ public class MissingEpisodesService
     // Missing = entries in expected not in present.
     //
     // Returns null for ignored series or ones with nothing missing.
-    private async Task<ScanSeries?> ProcessJellyfinSeriesAsync(PluginConfiguration cfg, Series series, string mode, string? sonarrPathFallback, CancellationToken ct)
+    private async Task<ScanSeries?> ProcessJellyfinSeriesAsync(PluginConfiguration cfg, Series series, string mode, string? sonarrPathFallback, CancellationToken ct, HashSet<int>? ignoredTvdb = null)
     {
-        var ignoredTvdb = new HashSet<int>(cfg.IgnoredSeriesTvdbIds);
+        ignoredTvdb ??= new HashSet<int>(cfg.IgnoredSeriesTvdbIds);
         var tvdbStr = series.GetProviderId(MetadataProvider.Tvdb);
         int.TryParse(tvdbStr, out var tvdbId);
         var tmdbStrSeries = series.GetProviderId(MetadataProvider.Tmdb);
@@ -955,11 +1010,13 @@ public class MissingEpisodesService
     // Also set the Sonarr Id on surviving entries so Search buttons work.
     private static void ApplySonarrHasFile(ScanSeries s, List<SonarrEpisode> eps, bool onlyMonitored)
     {
-        var epIndex = new Dictionary<(int, int), SonarrEpisode>();
+        var epIndex = new Dictionary<(int, int), SonarrEpisode>(eps.Count);
         foreach (var e in eps) epIndex[(e.SeasonNumber, e.EpisodeNumber)] = e;
 
-        var toRemove = new List<MissingEpisode>();
-        var countedAsHave = new HashSet<MissingEpisode>();
+        // First pass: classify each Missing entry. Sets stay reference-keyed so the
+        // subsequent RemoveAll is O(N) instead of O(N²) (List.Remove is linear).
+        var toRemove = new HashSet<MissingEpisode>(ReferenceEqualityComparer.Instance);
+        var countedAsHave = new HashSet<MissingEpisode>(ReferenceEqualityComparer.Instance);
         foreach (var m in s.Missing)
         {
             if (!epIndex.TryGetValue((m.SeasonNumber, m.EpisodeNumber), out var se)) continue;
@@ -978,20 +1035,29 @@ public class MissingEpisodesService
         }
         if (toRemove.Count == 0) return;
 
-        foreach (var m in toRemove) s.Missing.Remove(m);
+        s.Missing.RemoveAll(toRemove.Contains);
+
+        // Index seasons by number once instead of FirstOrDefault per removed episode.
+        var seasonIndex = new Dictionary<int, SeasonSummary>(s.Seasons.Count);
+        foreach (var ss in s.Seasons) seasonIndex[ss.SeasonNumber] = ss;
 
         foreach (var m in toRemove)
         {
-            var summary = s.Seasons.FirstOrDefault(x => x.SeasonNumber == m.SeasonNumber);
+            seasonIndex.TryGetValue(m.SeasonNumber, out var summary);
             if (countedAsHave.Contains(m))
             {
                 if (summary != null) summary.HaveEpisodes += 1;
-                else s.Seasons.Add(new SeasonSummary
+                else
                 {
-                    SeasonNumber = m.SeasonNumber,
-                    HaveEpisodes = 1,
-                    TotalEpisodes = 1
-                });
+                    var added = new SeasonSummary
+                    {
+                        SeasonNumber = m.SeasonNumber,
+                        HaveEpisodes = 1,
+                        TotalEpisodes = 1
+                    };
+                    s.Seasons.Add(added);
+                    seasonIndex[m.SeasonNumber] = added;
+                }
             }
             else
             {
@@ -1058,6 +1124,9 @@ public class MissingEpisodesService
                 if (x.TmdbId > 0) byTmdb[x.TmdbId] = x;
             }
 
+            // First pass: resolve Sonarr matches and fold in path/size/type metadata
+            // synchronously (no I/O). Build the work list for the parallel episode fetch.
+            var pairs = new List<(ScanSeries Local, SonarrSeries Remote)>();
             foreach (var s in result.Series)
             {
                 SonarrSeries? sonarrS = null;
@@ -1066,36 +1135,35 @@ public class MissingEpisodesService
                 if (sonarrS == null) continue;
                 s.SonarrId = sonarrS.Id;
                 if (s.TvdbId <= 0 && sonarrS.TvdbId > 0) s.TvdbId = sonarrS.TvdbId;
-                // Opportunistic data from Sonarr — fill only when missing so we don't clobber
-                // Jellyfin's own values for the user-picked source.
-                // Path + size reconciliation: trust whichever side actually has files.
-                // If Jellyfin's folder is empty/missing (size==0) but Sonarr has content,
-                // Jellyfin's path is stale — swap in Sonarr's path and size.
-                // If Jellyfin has content, keep Jellyfin's numbers (user-sourced truth).
+                // Path + size reconciliation: trust whichever side has files. Jellyfin's
+                // path can be stale after a move; Sonarr's matches the actual files.
                 var sonarrSize = sonarrS.Statistics?.SizeOnDisk ?? 0;
                 if (s.SizeOnDisk == 0 && sonarrSize > 0)
                 {
                     s.SizeOnDisk = sonarrSize;
                     if (!string.IsNullOrEmpty(sonarrS.Path)) s.Path = sonarrS.Path;
                 }
-                // If Sonarr knows the series as anime but Jellyfin didn't tag it, use Sonarr's type.
                 if (s.SeriesType == "standard")
                 {
                     var sonarrType = NormalizeSeriesType(sonarrS.SeriesType);
                     if (sonarrType != "standard") s.SeriesType = sonarrType;
                 }
+                pairs.Add((s, sonarrS));
+            }
 
-                List<SonarrEpisode> eps;
+            // Second pass: fan out the per-series episode fetches. ApplySonarrHasFile
+            // mutates only its `s` argument, so concurrent calls touching different
+            // series are safe.
+            await ParallelMapAsync<(ScanSeries Local, SonarrSeries Remote), object>(pairs, SonarrParallelism, ct, async pair =>
+            {
                 try
                 {
-                    eps = await _sonarr.GetEpisodesAsync(cfg.SonarrUrl, cfg.SonarrApiKey, sonarrS.Id, ct).ConfigureAwait(false);
+                    var eps = await _sonarr.GetEpisodesAsync(cfg.SonarrUrl, cfg.SonarrApiKey, pair.Remote.Id, ct).ConfigureAwait(false);
+                    ApplySonarrHasFile(pair.Local, eps, cfg.OnlyMonitored);
                 }
-                catch
-                {
-                    continue;
-                }
-                ApplySonarrHasFile(s, eps, cfg.OnlyMonitored);
-            }
+                catch { /* leave the series un-enriched */ }
+                return null;
+            }).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -1322,7 +1390,6 @@ public class ScanHistoryEntry
 public class ScanProgress
 {
     public bool InProgress { get; set; }
-    public int Current { get; set; }
     public int Total { get; set; }
     public string? CurrentTitle { get; set; }
     public string? Source { get; set; }
@@ -1346,9 +1413,12 @@ public class ScanProgress
 
     public void Advance(string? title)
     {
-        Current += 1;
+        Interlocked.Increment(ref _current);
         CurrentTitle = title;
     }
+
+    private int _current;
+    public int Current { get => _current; set => _current = value; }
 
     public void Finish()
     {
