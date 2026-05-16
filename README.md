@@ -29,6 +29,7 @@ Scans your **Jellyfin library**, your **Sonarr instance**, or queries **TMDB** w
 - [Security](#-security)
 - [Troubleshooting](#-troubleshooting)
 - [Building from source](#-building-from-source)
+- [Support the project](#-support-the-project)
 - [License](#-license)
 
 ---
@@ -283,6 +284,18 @@ dotnet build -c Release
 ```
 
 DLL lands in `bin/Release/net9.0/Jellyfin.Plugin.MissingEpisodes.dll`.
+
+---
+
+## ❤ Support the project
+
+Missing Episodes for Jellyfin is built and maintained in my spare time. If it's helping you keep your library tidy and you'd like to support ongoing development, any of these means a lot:
+
+- ⭐ **Star this repo** — it's free and helps others find it
+- 💖 **[Sponsor on GitHub](https://github.com/sponsors/ZL154)** — one-off or monthly, every dollar reaches the project
+- ☕ **[Buy me a coffee on Ko-fi](https://ko-fi.com/zl154)** — one-off tips
+
+Not expected, just appreciated. Issue reports and clear bug reports are equally valuable.
 
 ---
 
