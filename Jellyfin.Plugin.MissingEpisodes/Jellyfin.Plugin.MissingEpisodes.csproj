@@ -1,7 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <!-- net9.0 = Jellyfin 10.11.x, net10.0 = Jellyfin 12.x. Each framework
+         compiles against its matching Jellyfin packages (JellyfinVersion
+         below) and ships as its own zip. The 4th version segment tells the
+         two builds apart in the catalog: .0 = 10.11, .1 = 12. -->
+    <TargetFrameworks>net9.0;net10.0</TargetFrameworks>
     <OutputType>Library</OutputType>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -9,14 +13,26 @@
     <RootNamespace>Jellyfin.Plugin.MissingEpisodes</RootNamespace>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <LangVersion>latest</LangVersion>
-    <Version>1.0.10</Version>
+    <VersionPrefix>1.0.11</VersionPrefix>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net9.0'">
+    <JellyfinVersion>10.11.6</JellyfinVersion>
+    <AssemblyVersion>$(VersionPrefix).0</AssemblyVersion>
+    <FileVersion>$(VersionPrefix).0</FileVersion>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <JellyfinVersion>12.0.0</JellyfinVersion>
+    <AssemblyVersion>$(VersionPrefix).1</AssemblyVersion>
+    <FileVersion>$(VersionPrefix).1</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Jellyfin.Controller" Version="10.11.6">
+    <PackageReference Include="Jellyfin.Controller" Version="$(JellyfinVersion)">
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
-    <PackageReference Include="Jellyfin.Model" Version="10.11.6">
+    <PackageReference Include="Jellyfin.Model" Version="$(JellyfinVersion)">
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
   </ItemGroup>

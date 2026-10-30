@@ -306,6 +306,7 @@
     font: inherit; text-align: left; }
 .me-cal-toggle .me-cal-title { flex: 1; }
 .me-cal-count { color: var(--dim-2); font-weight: 500; letter-spacing: 0; text-transform: none; }
+.me-cal-hint p { margin: 0 0 .9rem; font-size: .78rem; color: var(--dim); }
 .me-cal-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .me-history-head .chev { width: 14px; height: 14px; color: var(--dim); transition: transform .18s; }
 .me-history.open .me-history-head .chev { transform: rotate(90deg); }
@@ -2155,7 +2156,7 @@
             sk.style.display = 'none';
             var hasAny = state.result && ((state.result.Series && state.result.Series.length)
                 || (state.result.IgnoredSeries && state.result.IgnoredSeries.length));
-            $('#meView').style.display = hasAny ? 'flex' : 'none';
+            $('#meView').style.display = hasAny ? '' : 'none';
             if(state.view == 'Standard'){
                 $('#meGrid').style.display = 'grid';  
                 $('#meFilters').style.display = '';   
@@ -2224,8 +2225,8 @@
         if (!r || !r.Series) { showEmpty(); return; }
         $('#meEmpty').style.display = 'none';
         var hasAny = (r.Series && r.Series.length) || (r.IgnoredSeries && r.IgnoredSeries.length);
-        $('#meFilters').style.display = hasAny ? 'flex' : 'none';
-        $('#meView').style.display = hasAny ? 'flex' : 'none';
+        $('#meFilters').style.display = hasAny ? '' : 'none';
+        $('#meView').style.display = hasAny ? '' : 'none';
         $('#meStatShows').textContent = r.Series.length;
         $('#meStatMissing').textContent = r.TotalMissing;
         $('#meStatSource').textContent = r.Source === 'jellyfin' ? 'Jellyfin' : 'Sonarr';
@@ -2513,14 +2514,20 @@ function renderCalendar(seriesList) {
             + '</section>';
     }).join('');
 
+    // With "Ignore unaired" on (the default) the scan drops future
+    // episodes, so the calendar can only show already-released ones.
+    var unairedHint = state.cfg && state.cfg.IgnoreUnaired !== false
+        ? '<p>Uncheck "Ignore unaired" in the settings and rescan to see upcoming episodes.</p>' : '';
+
     if (!html) {
         c.innerHTML = '<div class="me-empty">'
             + '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/></svg>'
-            + '<h3>Nothing planned</h3><p>Nothing scheduled</h3><p>No episodes with a known air date.</p><p>Uncheck "Ignore unaired" in the settings to see upcoming episodes.</></div>';
+            + '<h3>Nothing scheduled</h3><p>No missing episodes with a known air date.</p>'
+            + unairedHint + '</div>';
         return;
     }
 
-    c.innerHTML = html;
+    c.innerHTML = (unairedHint ? '<div class="me-cal-hint">' + unairedHint + '</div>' : '') + html;
 
     c.querySelectorAll('.me-poster[data-bg]').forEach(function (p) {
         setBgImage(p, p.getAttribute('data-bg'));
