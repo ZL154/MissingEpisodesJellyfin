@@ -146,8 +146,13 @@ public class MissingEpisodesController : ControllerBase
         {
             return BadRequest(new { error = "No episode ids supplied." });
         }
-        var sent = await _service.TriggerSearchAsync(req.EpisodeIds, ct).ConfigureAwait(false);
-        return Ok(new { sent });
+        try
+        {
+            var sent = await _service.TriggerSearchAsync(req.EpisodeIds, ct).ConfigureAwait(false);
+            return Ok(new { sent });
+        }
+        catch (System.InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        catch (System.Net.Http.HttpRequestException ex) { return StatusCode(502, new { error = ex.Message }); }
     }
 
     [HttpPost("series/{tvdbId}/ignore")]
