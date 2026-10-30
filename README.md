@@ -2,7 +2,7 @@
   <img src="https://img.shields.io/badge/Jellyfin-10.11%20%7C%2012-0b0b0b?style=for-the-badge&labelColor=000000&color=2b2b2b" />
   <img src="https://img.shields.io/badge/Type-Plugin-4d9ed1?style=for-the-badge&labelColor=000000&color=4d9ed1" />
   <img src="https://img.shields.io/badge/Integrates-Sonarr%20%7C%20TMDB-0b0b0b?style=for-the-badge&labelColor=000000&color=2b2b2b" />
-  <img src="https://img.shields.io/badge/Version-1.0.8-0b0b0b?style=for-the-badge&labelColor=000000&color=2b2b2b" />
+  <img src="https://img.shields.io/badge/Version-1.1.0-0b0b0b?style=for-the-badge&labelColor=000000&color=2b2b2b" />
   <img src="https://img.shields.io/badge/License-MIT-0b0b0b?style=for-the-badge&labelColor=000000&color=2b2b2b" />
 </p>
 
@@ -46,6 +46,7 @@ Scans your **Jellyfin library**, your **Sonarr instance**, or queries **TMDB** w
   2. **Filename parser** — walks `series.Path` on disk and parses `S01E05` / `1x05` / multi-ep patterns. Catches files Jellyfin never imported (e.g. shows where the library lists 0 episodes despite 144 GB on disk). Falls back to Sonarr's path when Jellyfin's is stale.
   3. **Sonarr `hasFile`** *(if configured)* — the authoritative per-episode flag. Catches episodes stored in folders neither Jellyfin nor Sonarr's canonical path covers (scattered-release layouts). Also drops unmonitored-in-Sonarr episodes from the missing list when **Only monitored** is on.
 - **Calendar view** — switch from the poster grid to a calendar of missing episodes with a known air date: *Already released*, *Tomorrow*, *This week*, *Next week*, then one section per month. Episodes are grouped per show and season. Turn off **Ignore unaired** to see upcoming episodes. *(Contributed by [RochiBZH](https://github.com/RochiBZH).)*
+- **Classic / Revamp styles** — a toggle in the header switches between the original dashboard look and an editorial "Revamp" layout. Saved per browser.
 - **One-click Sonarr search** — per episode, per season, per show, or everything currently visible.
 - **Auto-search** (optional) — scan + dispatch to Sonarr on a schedule.
 - **Rescan this show** — targeted refresh from the detail view, no full library scan.
@@ -100,6 +101,12 @@ Pop any season open and you get proper episode rows — 16:9 thumbnail (from Son
 
 ![Expanded season with episodes and search buttons](docs/screenshots/detail-episodes.png)
 
+### Calendar view
+
+The **Standard / Calendar** switch above the filters turns the poster grid into a timeline of missing episodes that have an air date. Sections run *Already released* (collapsed by default, most recent first), *Tomorrow*, *This week*, *Next week*, then one section per month for anything later. Episodes from the same show and season share one card, so a batch reads as `S01 · E03, E04` or `S01 · 6 eps · E01 - E06`, and a whole missing season shows as **Season 2 complete**. The badge shows the air date, or the date range for a batch. Click a card to open the same detail view as the grid. The Scope / Type / Search filters apply; Sort and **Search all** are hidden because they don't mean anything here.
+
+With **Ignore unaired** on (the default), the scan skips episodes that haven't aired, so only *Already released* fills up. Turn it off and rescan to see what's coming. Air dates are placed on the calendar by their UTC date.
+
 ### Settings
 
 The two segmented controls on the left are the core: **Scan source** (Sonarr or Jellyfin) and — only when Jellyfin is selected — **Jellyfin method** (Virtual items / TMDB / Gap detection). Both auto-save on click, no Save button needed. The method explainer changes text based on your picks and adds a note when Sonarr is configured, so there's no silent magic.
@@ -132,9 +139,9 @@ https://raw.githubusercontent.com/ZL154/MissingEpisodesJellyfin/main/manifest.js
 
 1. Download the latest zip from [Releases](https://github.com/ZL154/MissingEpisodesJellyfin/releases). Each release has two: `…_x.y.z.0.zip` for Jellyfin 10.11 and `…_x.y.z.1.zip` for Jellyfin 12. The plugin repository picks the right one automatically.
 2. Extract the DLL into your Jellyfin plugin directory:
-   - Docker: `/config/plugins/MissingEpisodes_x.y.z.w/`
-   - Linux: `/var/lib/jellyfin/plugins/MissingEpisodes_x.y.z.w/`
-   - Windows: `%ProgramData%\Jellyfin\Server\plugins\MissingEpisodes_x.y.z.w\`
+   - Docker: `/config/plugins/Missing Episodes_x.y.z.w/`
+   - Linux: `/var/lib/jellyfin/plugins/Missing Episodes_x.y.z.w/`
+   - Windows: `%ProgramData%\Jellyfin\Server\plugins\Missing Episodes_x.y.z.w\`
 3. Restart Jellyfin.
 
 ---
@@ -214,7 +221,7 @@ Either of those works standalone, but for libraries with files scattered across 
 - **Per-episode** — inline Search button on each missing episode row.
 - **Per-season** — header button on each season in the detail view.
 - **Search all missing (one show)** — bottom of the detail view.
-- **Search all (across current filter)** — toolbar button on the grid. Respects type, ignored, and text filters.
+- **Search all (across current filter)** — toolbar button on the grid (Standard view). Respects type, ignored, and text filters.
 - **Auto-search** — background worker runs at the configured interval, full scan, dispatches everything.
 
 Every path hits `POST /api/v3/command` with a batched `EpisodeSearch`.
@@ -245,7 +252,7 @@ To wipe: stop Jellyfin, delete the files, restart. Next scan regenerates them. H
 - **User-controlled strings escaped.** All series/episode titles, network names, and paths rendered into the UI go through an `escapeHtml` helper before `innerHTML` assignment.
 - **No path traversal.** File walks only touch `series.Path` from Jellyfin's library manager plus (optionally) Sonarr's path for the same series. No user-supplied paths accepted by any endpoint.
 - **Safe logging.** Series titles and paths appear in log messages only at `Debug` level using structured parameters — ASP.NET Core's formatter prevents log injection.
-- **No unbounded scans.** `Progress.InProgress` gates concurrent scans; refresh endpoint returns HTTP 409 while a scan runs.
+- **No overlapping scans.** Scans run one at a time behind a lock (a second request waits its turn), and the per-show refresh endpoint returns HTTP 409 while a full scan runs.
 
 ---
 
@@ -262,6 +269,12 @@ Either Sonarr isn't configured, or the selected shows have no Sonarr id yet. In 
 
 **Show reads as 0 episodes even though files exist.**
 Fixed in 1.0.3 — the plugin now walks the folder and parses S##E## from filenames as a safety net. If you're on 1.0.3+ and still seeing this, check that the filenames actually contain S/E markers (not just an episode number).
+
+**Calendar only shows "Already released".**
+**Ignore unaired** is on (the default), so the scan leaves out episodes that haven't aired. Untick it in **Settings**, save, and rescan.
+
+**Which zip do I need?**
+`…_x.y.z.0.zip` is for Jellyfin 10.11, `…_x.y.z.1.zip` is for Jellyfin 12. Installing from the plugin repository picks the right one for you.
 
 **"An error occurred while getting the plugin details from the repository."**
 Harmless. Appears when the plugin was installed manually. To silence: add the manifest URL under **Plugins → Repositories**, then uninstall and reinstall from the catalog.
