@@ -104,6 +104,8 @@
 
 .me-filters { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin-bottom: 1.1rem;
   justify-content: flex-end; }
+.me-filters[data-view="calendar"] #meSortSeg,
+.me-filters[data-view="calendar"] #meBulkSearchBtn { display: none !important; }
 .me-search { position: relative; flex: 0 1 auto; }
 .me-search svg { position: absolute; left: .65rem; top: 50%; transform: translateY(-50%);
   width: 13px; height: 13px; color: var(--dim); pointer-events: none; }
@@ -138,6 +140,7 @@
   -webkit-box-orient: vertical; min-height: 2.2em; }
 .me-show-meta .s { font-size: .7rem; color: var(--dim); display: flex; gap: .4rem; align-items: center;
   flex-wrap: wrap; }
+.me-show-meta .s strong { color: var(--text); font-weight: 700; }
 .me-show-meta .s .dot { width: 3px; height: 3px; border-radius: 50%; background: var(--dim-2); }
 .me-size-chip { position: absolute; bottom: .5rem; left: .5rem; background: rgba(0,0,0,0.72);
   color: #fff; font-size: .68rem; padding: .18rem .48rem; border-radius: 100px; font-weight: 500;
@@ -297,8 +300,13 @@
 .me-history.show { display: block; }
 .me-history-head { display: flex; align-items: center; justify-content: space-between;
   cursor: pointer; user-select: none; padding: .25rem 0; }
-.me-history-head h4 { margin: 0; font-size: .82rem; font-weight: 600; color: var(--dim);
+.me-history-head h4, .me-history-head .me-cal-title { margin: 0; font-size: .82rem; font-weight: 600; color: var(--dim);
   text-transform: uppercase; letter-spacing: 1px; display: flex; align-items: center; gap: .45rem; }
+.me-cal-toggle { width: 100%; border: 0; color: inherit; background: transparent;
+    font: inherit; text-align: left; }
+.me-cal-toggle .me-cal-title { flex: 1; }
+.me-cal-count { color: var(--dim-2); font-weight: 500; letter-spacing: 0; text-transform: none; }
+.me-cal-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .me-history-head .chev { width: 14px; height: 14px; color: var(--dim); transition: transform .18s; }
 .me-history.open .me-history-head .chev { transform: rotate(90deg); }
 .me-history-body { display: none; padding-top: .5rem; border-top: 1px solid var(--border);
@@ -345,6 +353,10 @@
   .me-ep { flex-wrap: wrap; }
   .me-ep-thumb { flex: 0 0 100px; }
   .me-ep-top .air { margin-left: 0; }
+    #missingEpisodesPage #meCalendar .me-cal-section .me-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+        gap: .4rem !important;
+    }
 }
 
 /* ============================================================================
@@ -573,7 +585,7 @@
    tracked-out label). Search-all button is a strong indigo CTA pinned
    to the right. Drops the wrapping card chrome. */
 #missingEpisodesPage[data-me-style="revamp"] .me-filters {
-    display: grid !important;
+    display: grid;
     grid-template-columns: auto auto 1fr auto auto !important;
     align-items: end !important;
     gap: 14px 18px !important;
@@ -593,10 +605,12 @@
     margin-top: 16px !important;
 }
 #missingEpisodesPage[data-me-style="revamp"] #meScopeSeg::before { content: "Scope"; }
+#missingEpisodesPage[data-me-style="revamp"] #meViewSeg::before { content: "View"; }
 #missingEpisodesPage[data-me-style="revamp"] #meTypeSeg::before  { content: "Type"; }
 #missingEpisodesPage[data-me-style="revamp"] .me-search::before  { content: "Search"; }
 #missingEpisodesPage[data-me-style="revamp"] #meSortSeg::before  { content: "Sort"; }
 #missingEpisodesPage[data-me-style="revamp"] #meScopeSeg::before,
+#missingEpisodesPage[data-me-style="revamp"] #meViewSeg::before,
 #missingEpisodesPage[data-me-style="revamp"] #meTypeSeg::before,
 #missingEpisodesPage[data-me-style="revamp"] .me-search::before,
 #missingEpisodesPage[data-me-style="revamp"] #meSortSeg::before {
@@ -700,7 +714,7 @@
    underneath in display weight. Dramatic hover with scale + accent
    glow ring + tilt. */
 #missingEpisodesPage[data-me-style="revamp"] .me-grid {
-    display: grid !important;
+    display: grid;
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)) !important;
     gap: 22px 18px !important;
     background: transparent !important;
@@ -994,7 +1008,8 @@
 #missingEpisodesPage[data-me-style="revamp"] .me-history-head {
     padding: 0 0 4px 0 !important;
 }
-#missingEpisodesPage[data-me-style="revamp"] .me-history-head h4 {
+#missingEpisodesPage[data-me-style="revamp"] .me-history-head h4,
+#missingEpisodesPage[data-me-style="revamp"] .me-history-head .me-cal-title {
     font: 700 10px/1 var(--rv-mono) !important;
     letter-spacing: 0.24em !important;
     text-transform: uppercase !important;
@@ -1014,6 +1029,9 @@
     top: 14px; bottom: 8px;
     width: 1px;
     background: var(--border);
+}
+#missingEpisodesPage[data-me-style="revamp"] .me-cal-section .me-history-body::before {
+    display: none;
 }
 #missingEpisodesPage[data-me-style="revamp"] .me-history-row {
     grid-template-columns: auto auto auto auto auto !important;
@@ -1701,7 +1719,12 @@
       </div>
       <div class="me-history-body" id="meHistoryBody"></div>
     </div>
-
+    <div class="me-filters" id="meView" style="display:none;">
+        <div class="me-segment" id="meViewSeg">
+                <button type="button" data-v="Standard" class="active">Standard</button>
+                <button type="button" data-v="Calendar">Calendar</button>
+        </div>
+    </div>
     <div class="me-filters" id="meFilters" style="display:none;">
       <div class="me-segment" id="meScopeSeg">
         <button type="button" data-v="active" class="active">Active</button>
@@ -1730,6 +1753,8 @@
     </div>
 
     <div id="meGrid" class="me-grid"></div>
+
+    <div id="meCalendar"></div>
 
     <div id="meEmpty" class="me-empty" style="display:none;">
       <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 2v4M17 2v4M2 10h20"/></svg>
@@ -1821,7 +1846,7 @@
     } catch (e) { /* swallow — toggle is non-critical */ }
 
     var state = { result: null, filtered: [], current: null, cfg: null,
-                  sort: 'count', query: '', type: 'all', scope: 'active',
+                  sort: 'count', query: '', type: 'all', scope: 'active', view : 'Standard',
                   cfgOpen: false, pollId: null };
 
     function formatBytes(n) {
@@ -2122,10 +2147,22 @@
             }
             sk.innerHTML = cards;
             sk.style.display = 'grid';
-            $('#meGrid').style.display = 'none';
+            $('#meCalendar').style.display = 'none'; 
+            $('#meGrid').style.display = 'none'; 
+            $('#meFilters').style.display = 'none';   
+            $('#meView').style.display = 'none';
         } else {
             sk.style.display = 'none';
-            $('#meGrid').style.display = 'grid';
+            var hasAny = state.result && ((state.result.Series && state.result.Series.length)
+                || (state.result.IgnoredSeries && state.result.IgnoredSeries.length));
+            $('#meView').style.display = hasAny ? 'flex' : 'none';
+            if(state.view == 'Standard'){
+                $('#meGrid').style.display = 'grid';  
+                $('#meFilters').style.display = '';   
+            }else if(state.view == 'Calendar' ){
+                $('#meCalendar').style.display = 'grid';
+                $('#meFilters').style.display = '';
+            }
         }
     }
 
@@ -2177,7 +2214,9 @@
     function showEmpty() {
         $('#meEmpty').style.display = 'block';
         $('#meGrid').innerHTML = '';
+        $('#meCalendar').innerHTML = '';
         $('#meFilters').style.display = 'none';
+        $('#meView').style.display = 'none';
     }
 
     function render() {
@@ -2186,6 +2225,7 @@
         $('#meEmpty').style.display = 'none';
         var hasAny = (r.Series && r.Series.length) || (r.IgnoredSeries && r.IgnoredSeries.length);
         $('#meFilters').style.display = hasAny ? 'flex' : 'none';
+        $('#meView').style.display = hasAny ? 'flex' : 'none';
         $('#meStatShows').textContent = r.Series.length;
         $('#meStatMissing').textContent = r.TotalMissing;
         $('#meStatSource').textContent = r.Source === 'jellyfin' ? 'Jellyfin' : 'Sonarr';
@@ -2227,7 +2267,8 @@
             list.sort(function (a, b) { return b.MissingCount - a.MissingCount; });
         }
         state.filtered = list;
-        renderGrid();
+        if (state.view === 'Calendar') renderCalendar(list);
+        else renderGrid();
     }
 
     function renderGrid() {
@@ -2286,6 +2327,218 @@
         });
     }
 
+    function getEpisodesWithDate(seriesList) {
+    var out = [];
+    (seriesList || []).forEach(function (s) {
+        (s.Missing || []).forEach(function (m) {
+            if (!m.AirDateUtc) return;              
+            var d = airDateLocal(m.AirDateUtc);
+            if (!d) return;                        
+            out.push({
+                series: s,
+                SeriesTitle: s.Title,
+                SeasonNumber: m.SeasonNumber,
+                EpisodeNumber: m.EpisodeNumber,
+                Title: m.Title,
+                AirDateUtc: m.AirDateUtc,
+                date: d
+            });
+        });
+    });
+    out.sort(function (a, b) { return a.date - b.date; });
+    return out;
+}
+
+
+function airDateLocal(iso) {
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return null;
+    return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+  
+function addDays(d, n) {
+    var r = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    r.setDate(r.getDate() + n);
+    return r;
+}
+
+function groupUpcoming(episodes, now) {
+    now = now || new Date();
+    var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var tomorrow = addDays(today, 1);
+    var dow = (today.getDay() + 6) % 7;            
+    var nextWeekStart = addDays(today, 7 - dow);   
+    var weekAfterStart = addDays(nextWeekStart, 7); 
+
+    var groups = { released: [], tomorrow: [], week: [], next: [], months: [] };
+    var monthIndex = {};
+
+    episodes.forEach(function (ep) {
+        var t = ep.date.getTime();
+        if (t < tomorrow.getTime()) groups.released.push(ep);
+        else if (t === tomorrow.getTime()) groups.tomorrow.push(ep);
+        else if (t < nextWeekStart.getTime()) groups.week.push(ep);
+        else if (t < weekAfterStart.getTime()) groups.next.push(ep);
+        else {
+            var key = ep.date.getFullYear() + '-' + pad2(ep.date.getMonth() + 1);
+            if (!monthIndex[key]) {
+                var label = ep.date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+                label = label.charAt(0).toUpperCase() + label.slice(1); 
+                monthIndex[key] = { key: 'month-' + key, label: label, list: [] };
+                groups.months.push(monthIndex[key]);
+            }
+            monthIndex[key].list.push(ep);
+        }
+    });
+
+    groups.released.reverse();
+    return groups;
+}
+
+var calendarEpisodes = [];
+
+function pad2(n) { return n < 10 ? '0' + n : String(n); }
+
+function renderCalendar(seriesList) {
+    var c = $('#meCalendar');
+    if (!state.result) return;
+
+    var episodes = getEpisodesWithDate(seriesList || state.result.Series);
+    var groups = groupUpcoming(episodes);
+    calendarEpisodes = [];
+
+    var sections = [
+        { key: 'released', label: 'Already released', list: groups.released },
+        { key: 'tomorrow', label: 'Tomorrow',         list: groups.tomorrow },
+        { key: 'week',     label: 'This week',        list: groups.week },
+        { key: 'next',     label: 'Next week',        list: groups.next }
+    ].concat(groups.months.map(function (m) {
+        return { key: m.key, label: m.label, list: m.list };
+    }));
+
+    var html = sections.map(function (sec) {
+        var list = sec.list;
+        if (!list.length) return '';                
+
+        var groupedEpisodes = [];
+        var groupIndex = Object.create(null);
+        list.forEach(function (ep) {
+            var s = ep.series;
+            var seriesKey = s.TvdbId ? 'tvdb:' + s.TvdbId
+                : (s.TmdbId ? 'tmdb:' + s.TmdbId
+                    : (s.JellyfinSeriesId || 'title:' + s.Title));
+            var key = seriesKey + ':' + ep.SeasonNumber;
+            if (!groupIndex[key]) {
+                groupIndex[key] = { series: s, seasonNumber: ep.SeasonNumber, episodes: [] };
+                groupedEpisodes.push(groupIndex[key]);
+            }
+            groupIndex[key].episodes.push(ep);
+        });
+        groupedEpisodes.forEach(function (group) {
+            group.episodes.sort(function (a, b) { return a.date - b.date; });
+        });
+        if (sec.key === 'released') {
+            groupedEpisodes.sort(function (a, b) {
+                return a.series.Title.localeCompare(b.series.Title)
+                    || a.seasonNumber - b.seasonNumber;
+            });
+        }
+
+        var cards = groupedEpisodes.map(function (group) {
+            var idx = calendarEpisodes.push(group) - 1;
+            var s = group.series;
+            var groupEps = group.episodes;
+            var seasonNumber = group.seasonNumber;
+
+            var posterUrl = resolveImage(s.PosterUrl, 'Primary');
+            var posterData = posterUrl ? ' data-bg="' + escapeHtml(posterUrl) + '"' : '';
+            var poster = posterUrl
+                ? '<div class="me-poster"' + posterData + '></div>'
+                : '<div class="me-poster"><div class="me-ph">' + escapeHtml(s.Title) + '</div></div>';
+
+            var firstDate = groupEps[0].date;
+            var lastDate = groupEps[groupEps.length - 1].date;
+            var dateTxt = firstDate.toLocaleDateString('en-US', {
+                weekday: 'short', day: 'numeric', month: 'short'
+            });
+            if (groupEps.length > 1) {
+                var firstDay = firstDate.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+                var lastDay = lastDate.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+                dateTxt = firstDay === lastDay ? firstDay : firstDay + ' - ' + lastDay;
+            }
+            var badgeStyle = sec.key === 'released' ? ' style="background:var(--accent-2);"' : '';
+            var badge = '<span class="me-badge"' + badgeStyle + '>' + escapeHtml(dateTxt) + '</span>';
+
+            var titleTag = s.SeriesType === 'anime'
+                ? '<span class="me-type-pill">Anime</span>' : '';
+            var seasonSummary = (s.Seasons || []).find(function (season) {
+                return season.SeasonNumber === seasonNumber;
+            });
+            var isCompleteSeason = seasonSummary && seasonSummary.TotalEpisodes > 0
+                && groupEps.length === seasonSummary.TotalEpisodes;
+            var episodeNumbers = groupEps.map(function (ep) {
+                return ep.EpisodeNumber;
+            }).sort(function (a, b) { return a - b; });
+            var episodeSummary = groupEps.length > 4
+                ? groupEps.length + ' eps · E' + pad2(episodeNumbers[0])
+                    + ' - E' + pad2(episodeNumbers[episodeNumbers.length - 1])
+                : episodeNumbers.map(function (episodeNumber) {
+                    return 'E' + pad2(episodeNumber);
+                }).join(', ');
+            var seasonCode = 'S' + pad2(seasonNumber);
+            var epLine = isCompleteSeason
+                ? (seasonNumber === 0 ? '<strong>Specials</strong> complete' : '<strong>Season ' + seasonNumber + '</strong> complete')
+                : '<strong>' + seasonCode + '</strong> · ' + episodeSummary;
+
+            return '<div class="me-show" data-i="' + idx + '">'
+                + poster
+                + badge
+                + '<div class="me-show-meta">'
+                + '<div class="t">' + escapeHtml(s.Title) + titleTag + '</div>'
+                + '<div class="s">' + epLine + '</div>'
+                + '</div></div>';
+        }).join('');
+
+        var isOpen = sec.key !== 'released';
+        var sectionBodyId = 'meCal-' + sec.key + '-body';
+        return '<section class="me-history show me-cal-section' + (isOpen ? ' open' : '') + '">'
+            + '<button type="button" class="me-history-head me-cal-toggle" aria-expanded="'
+            + (isOpen ? 'true' : 'false') + '" aria-controls="' + sectionBodyId + '">'
+            + '<span class="me-cal-title"><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m9 6 6 6-6 6"/></svg>'
+            + escapeHtml(sec.label) + ' <span class="me-cal-count">· ' + list.length + ' episode'
+            + (list.length === 1 ? '' : 's') + '</span></span></button>'
+            + '<div class="me-history-body" id="' + sectionBodyId + '">'
+            + '<div class="me-grid">' + cards + '</div></div>'
+            + '</section>';
+    }).join('');
+
+    if (!html) {
+        c.innerHTML = '<div class="me-empty">'
+            + '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/></svg>'
+            + '<h3>Nothing planned</h3><p>Nothing scheduled</h3><p>No episodes with a known air date.</p><p>Uncheck "Ignore unaired" in the settings to see upcoming episodes.</></div>';
+        return;
+    }
+
+    c.innerHTML = html;
+
+    c.querySelectorAll('.me-poster[data-bg]').forEach(function (p) {
+        setBgImage(p, p.getAttribute('data-bg'));
+    });
+    c.querySelectorAll('.me-cal-toggle').forEach(function (toggle) {
+        toggle.addEventListener('click', function () {
+            var section = toggle.closest('.me-cal-section');
+            var isOpen = section.classList.toggle('open');
+            toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        });
+    });
+    c.querySelectorAll('.me-show').forEach(function (el) {
+        el.addEventListener('click', function () {
+            var group = calendarEpisodes[parseInt(el.getAttribute('data-i'), 10)];
+            openDetail(group.series);
+        });
+    });
+}
     // Called from the detail view's Unignore button.
     function unignoreCurrent() {
         var s = state.current;
@@ -2596,6 +2849,24 @@
         if (e.target.tagName === 'BUTTON') {
             state.scope = e.target.getAttribute('data-v');
             setSeg('#meScopeSeg', state.scope);
+            applyFilters();
+        }
+    });
+    $('#meViewSeg').addEventListener('click', function (e) {
+        if (e.target.tagName === 'BUTTON') {
+            state.view = e.target.getAttribute('data-v');
+            if(state.view == "Standard"){
+                $('#meCalendar').style.display = 'none';
+                $('#meGrid').style.display = '';
+                $('#meFilters').style.display = '';
+                $('#meFilters').removeAttribute('data-view');
+            }else if(state.view == "Calendar"){
+                $('#meGrid').style.display = 'none';
+                $('#meCalendar').style.display = '';
+                $('#meFilters').style.display = '';
+                $('#meFilters').setAttribute('data-view', 'calendar');
+            }
+            setSeg('#meViewSeg', state.view);
             applyFilters();
         }
     });
