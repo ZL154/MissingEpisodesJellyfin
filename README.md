@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/Jellyfin-10.11%2B-0b0b0b?style=for-the-badge&labelColor=000000&color=2b2b2b" />
+  <img src="https://img.shields.io/badge/Jellyfin-10.11%20%7C%2012-0b0b0b?style=for-the-badge&labelColor=000000&color=2b2b2b" />
   <img src="https://img.shields.io/badge/Type-Plugin-4d9ed1?style=for-the-badge&labelColor=000000&color=4d9ed1" />
   <img src="https://img.shields.io/badge/Integrates-Sonarr%20%7C%20TMDB-0b0b0b?style=for-the-badge&labelColor=000000&color=2b2b2b" />
   <img src="https://img.shields.io/badge/Version-1.0.8-0b0b0b?style=for-the-badge&labelColor=000000&color=2b2b2b" />
@@ -12,7 +12,7 @@ Find the gaps in your TV library — and let Sonarr fill them.
 
 Scans your **Jellyfin library**, your **Sonarr instance**, or queries **TMDB** when neither has the data. Shows exactly what's missing per show, per season, per episode, with thumbnails, air dates, storage sizes, paths, and a one-click Search button that hands off to Sonarr.
 
-> **Status:** stable (**v1.0.8**). Works end-to-end on Jellyfin 10.11.x + Sonarr v3. Install via the plugin repository URL below or as a manual DLL drop.
+> **Status:** stable (**v1.1.0**). Works end-to-end on Jellyfin 10.11.x and 12.x + Sonarr v3. Install via the plugin repository URL below or as a manual DLL drop.
 
 ---
 
@@ -45,6 +45,7 @@ Scans your **Jellyfin library**, your **Sonarr instance**, or queries **TMDB** w
   1. **Jellyfin library** — non-virtual items the library scan imported.
   2. **Filename parser** — walks `series.Path` on disk and parses `S01E05` / `1x05` / multi-ep patterns. Catches files Jellyfin never imported (e.g. shows where the library lists 0 episodes despite 144 GB on disk). Falls back to Sonarr's path when Jellyfin's is stale.
   3. **Sonarr `hasFile`** *(if configured)* — the authoritative per-episode flag. Catches episodes stored in folders neither Jellyfin nor Sonarr's canonical path covers (scattered-release layouts). Also drops unmonitored-in-Sonarr episodes from the missing list when **Only monitored** is on.
+- **Calendar view** — switch from the poster grid to a calendar of missing episodes with a known air date: *Already released*, *Tomorrow*, *This week*, *Next week*, then one section per month. Episodes are grouped per show and season. Turn off **Ignore unaired** to see upcoming episodes. *(Contributed by [RochiBZH](https://github.com/RochiBZH).)*
 - **One-click Sonarr search** — per episode, per season, per show, or everything currently visible.
 - **Auto-search** (optional) — scan + dispatch to Sonarr on a schedule.
 - **Rescan this show** — targeted refresh from the detail view, no full library scan.
@@ -129,7 +130,7 @@ https://raw.githubusercontent.com/ZL154/MissingEpisodesJellyfin/main/manifest.js
 
 ### Option 2 — Manual install
 
-1. Download the latest zip from [Releases](https://github.com/ZL154/MissingEpisodesJellyfin/releases).
+1. Download the latest zip from [Releases](https://github.com/ZL154/MissingEpisodesJellyfin/releases). Each release has two: `…_x.y.z.0.zip` for Jellyfin 10.11 and `…_x.y.z.1.zip` for Jellyfin 12. The plugin repository picks the right one automatically.
 2. Extract the DLL into your Jellyfin plugin directory:
    - Docker: `/config/plugins/MissingEpisodes_x.y.z.w/`
    - Linux: `/var/lib/jellyfin/plugins/MissingEpisodes_x.y.z.w/`
@@ -275,7 +276,7 @@ Scan source / Jellyfin method segments auto-save on click. URL, API key, interva
 
 ## 🏗️ Building from source
 
-.NET 9 SDK required.
+.NET 9 and .NET 10 SDKs required (the project builds for both Jellyfin 10.11 and 12).
 
 ```bash
 git clone https://github.com/ZL154/MissingEpisodesJellyfin.git
@@ -283,7 +284,7 @@ cd MissingEpisodesJellyfin/Jellyfin.Plugin.MissingEpisodes
 dotnet build -c Release
 ```
 
-DLL lands in `bin/Release/net9.0/Jellyfin.Plugin.MissingEpisodes.dll`.
+DLLs land in `bin/Release/net9.0/` (Jellyfin 10.11) and `bin/Release/net10.0/` (Jellyfin 12).
 
 ---
 
